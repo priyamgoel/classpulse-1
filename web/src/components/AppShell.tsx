@@ -29,11 +29,19 @@ import { m3Tokens } from '@/theme/tokens';
 
 interface AppShellProps {
   children: React.ReactNode;
+  activeTab?: number;
+  onTabChange?: (index: number) => void;
 }
 
-export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const [activeTab, setActiveTab] = useState(0);
+export const AppShell: React.FC<AppShellProps> = ({
+  children,
+  activeTab: controlledActiveTab,
+  onTabChange,
+}) => {
+  const [internalTab, setInternalTab] = useState(0);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
+  const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalTab;
 
   const { user, logout } = useAuth();
 
@@ -58,6 +66,16 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     { label: 'Forum', icon: <ForumIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Doubt resolution forum' },
     { label: 'Profile', icon: <AccountCircleIcon />, disabled: false, tooltip: 'Account settings & profile' },
   ];
+
+  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
+    if (!navItems[newValue].disabled) {
+      if (onTabChange) {
+        onTabChange(newValue);
+      } else {
+        setInternalTab(newValue);
+      }
+    }
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: m3Tokens.color.background }}>
@@ -113,11 +131,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         <Box sx={{ borderTop: `1px solid ${m3Tokens.color.outlineVariant}`, px: 2 }}>
           <Tabs
             value={activeTab}
-            onChange={(_, newValue) => {
-              if (!navItems[newValue].disabled) {
-                setActiveTab(newValue);
-              }
-            }}
+            onChange={handleTabChange}
             variant="scrollable"
             scrollButtons="auto"
             textColor="primary"

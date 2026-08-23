@@ -23,6 +23,21 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
     _fetchAttendanceData();
   }
 
+  // Safe parsing helper methods to prevent String vs num type cast errors
+  double _parseDouble(dynamic val, [double defaultVal = 0.0]) {
+    if (val == null) return defaultVal;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? defaultVal;
+    return defaultVal;
+  }
+
+  int _parseInt(dynamic val, [int defaultVal = 0]) {
+    if (val == null) return defaultVal;
+    if (val is num) return val.toInt();
+    if (val is String) return int.tryParse(val) ?? defaultVal;
+    return defaultVal;
+  }
+
   Future<void> _fetchAttendanceData() async {
     setState(() {
       _isLoading = true;
@@ -60,8 +75,8 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
 
   void _openCourseDrilldown(Map<String, dynamic> summary) {
     final classroomId = summary['classroom_id'];
-    final courseCode = summary['course_code'];
-    final courseName = summary['course_name'];
+    final courseCode = summary['course_code'] ?? '';
+    final courseName = summary['course_name'] ?? '';
 
     final courseRecords = _records.where((r) => r['classroom_id'] == classroomId).toList();
 
@@ -122,7 +137,7 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                       final rec = courseRecords[idx];
                       final dateStr = rec['session_started_at'] ?? rec['validated_at'];
                       final date = DateTime.tryParse(dateStr ?? '')?.toLocal();
-                      final aclMs = rec['acl_ms'];
+                      final aclMs = _parseInt(rec['acl_ms'], -1);
 
                       return ListTile(
                         contentPadding: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
@@ -131,7 +146,9 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                           child: const Icon(Icons.check_circle, color: Colors.green, size: 22),
                         ),
                         title: Text(
-                          date != null ? '${date.day}/${date.month}/${date.year} at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}' : 'Session',
+                          date != null
+                              ? '${date.day}/${date.month}/${date.year} at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'
+                              : 'Session',
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                         subtitle: Text(
@@ -146,12 +163,14 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                               'PRESENT',
                               style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
                             ),
-                            if (aclMs != null)
+                            if (aclMs >= 0)
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   const Icon(Icons.flash_on, size: 12, color: M3Tokens.secondary),
-                                  Text('${aclMs}ms', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: M3Tokens.secondary)),
+                                  Text('${aclMs}ms',
+                                      style: const TextStyle(
+                                          fontSize: 10, fontWeight: FontWeight.bold, color: M3Tokens.secondary)),
                                 ],
                               ),
                           ],
@@ -169,9 +188,9 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final overallPct = (_overallStats?['attendance_percentage'] as num?)?.toDouble() ?? 100.0;
-    final attendedTotal = _overallStats?['attended_sessions'] ?? 0;
-    final totalSessions = _overallStats?['total_sessions'] ?? 0;
+    final overallPct = _parseDouble(_overallStats?['attendance_percentage'], 100.0);
+    final attendedTotal = _parseInt(_overallStats?['attended_sessions'], 0);
+    final totalSessions = _parseInt(_overallStats?['total_sessions'], 0);
 
     return Scaffold(
       backgroundColor: M3Tokens.surface,
@@ -251,7 +270,7 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: LinearProgressIndicator(
-                              value: overallPct / 100.0,
+                              value: (overallPct / 100.0).clamp(0.0, 1.0),
                               minHeight: 8,
                               backgroundColor: M3Tokens.surface.withValues(alpha: 0.5),
                               color: overallPct >= 75 ? Colors.green : Colors.orange,
@@ -287,9 +306,9 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                       )
                     else
                       ..._summaries.map((s) {
-                        final pct = (s['attendance_percentage'] as num?)?.toDouble() ?? 100.0;
-                        final attended = s['attended_sessions'] ?? 0;
-                        final total = s['total_sessions'] ?? 0;
+                        final pct = _parseDouble(s['attendance_percentage'], 100.0);
+                        final attended = _parseInt(s['attended_sessions'], 0);
+                        final total = _parseInt(s['total_sessions'], 0);
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -362,7 +381,10 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                                       ),
                                       Text(
                                         '$attended / $total sessions',
-                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: M3Tokens.onSurfaceVariant),
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: M3Tokens.onSurfaceVariant),
                                       ),
                                     ],
                                   ),
@@ -370,7 +392,7 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(3),
                                     child: LinearProgressIndicator(
-                                      value: total > 0 ? (attended / total) : 1.0,
+                                      value: total > 0 ? (attended / total).clamp(0.0, 1.0) : 1.0,
                                       minHeight: 5,
                                       backgroundColor: M3Tokens.surfaceVariant,
                                       color: pct >= 75 ? Colors.green : Colors.orange,

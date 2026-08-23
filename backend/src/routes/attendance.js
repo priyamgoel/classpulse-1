@@ -127,7 +127,7 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
     const sessionsResult = await db.query(
       `SELECT s.id, s.started_at, s.ended_at,
               COUNT(ar.id)::int as present_count,
-              ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1) as avg_acl_ms
+              ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1)::float as avg_acl_ms
        FROM sessions s
        LEFT JOIN attendance_records ar ON ar.session_id = s.id
        WHERE s.classroom_id = $1
@@ -144,11 +144,11 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
               COUNT(ar.id)::int as attended_sessions,
               CASE
                 WHEN $2::int > 0 THEN
-                  ROUND((COUNT(ar.id)::numeric / $2::numeric) * 100, 1)
+                  ROUND((COUNT(ar.id)::numeric / $2::numeric) * 100, 1)::float
                 ELSE 100.0
               END as attendance_percentage,
               MAX(ar.validated_at) as last_attendance_at,
-              ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1) as avg_acl_ms
+              ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1)::float as avg_acl_ms
        FROM enrollments en
        JOIN users u ON en.student_id = u.id
        LEFT JOIN sessions s ON s.classroom_id = en.classroom_id
@@ -271,7 +271,7 @@ router.get('/me', authenticateToken, requireRole('student'), async (req, res) =>
               COUNT(DISTINCT ar.id)::int as attended_sessions,
               CASE
                 WHEN COUNT(DISTINCT s.id) > 0 THEN
-                  ROUND((COUNT(DISTINCT ar.id)::numeric / COUNT(DISTINCT s.id)::numeric) * 100, 1)
+                  ROUND((COUNT(DISTINCT ar.id)::numeric / COUNT(DISTINCT s.id)::numeric) * 100, 1)::float
                 ELSE 100.0
               END as attendance_percentage
        FROM enrollments en
