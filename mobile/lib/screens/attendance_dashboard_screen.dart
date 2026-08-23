@@ -375,10 +375,15 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(
-                                        'Section: ${s['section_name'] ?? ""} • Teacher: ${s['teacher_name'] ?? ""}',
-                                        style: const TextStyle(fontSize: 11, color: M3Tokens.onSurfaceVariant),
+                                      Expanded(
+                                        child: Text(
+                                          'Section: ${s['section_name'] ?? ""} • Teacher: ${s['teacher_name'] ?? ""}',
+                                          style: const TextStyle(fontSize: 11, color: M3Tokens.onSurfaceVariant),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
+                                      const SizedBox(width: 8),
                                       Text(
                                         '$attended / $total sessions',
                                         style: const TextStyle(
