@@ -28,6 +28,7 @@ This project is built strictly according to the following 3 core specification f
 | **Part 5** | QR Display (Web) + Scanner (Flutter) | **COMPLETED** | `4390a80` | Live Web 3-QR rotating projector (`LiveSessionModal.tsx`) with Socket.io real-time roster feed and ACL chips; Flutter multi-frame camera scanner (`QrScannerScreen.dart`) with 3-frame sequence buffer and instant Attendance Capture Latency display. |
 | **Part 6** | Homepages & Dashboards | **COMPLETED** | `5959c99` | Teacher analytics dashboard (`AttendanceAnalyticsView.tsx`) with 4 top metrics, student attendance performance table, student drill-down modal, past sessions timeline, and future-proof card grid (`PulseMeter*`, `Quizzes*`, `Forum*`); Student mobile attendance dashboard (`attendance_dashboard_screen.dart`) with overall percentage card, per-subject breakdown, and interactive session history drill-downs. |
 | **Part 7** | CI/CD & Distribution | **COMPLETED** | `10682c8` | GitHub Actions multi-job pipeline (`.github/workflows/ci.yml`) for automated backend, web, and mobile testing & APK generation; Android camera & internet permissions; and comprehensive [`DEPLOYMENT_GUIDE.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/DEPLOYMENT_GUIDE.md). |
+| **Enhancements** | Lifecycle Management | **COMPLETED** | `b35c404` | Teacher classroom deletion (end of semester cascade delete) with M3 red confirmation dialog (`DELETE /classrooms/:id`); Student unenrollment on mobile via long-press bottom sheet (`DELETE /classrooms/:id/leave`). |
 
 ---
 
