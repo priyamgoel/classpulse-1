@@ -22,7 +22,7 @@ This project is built strictly according to the following 3 core specification f
 | Part | Name | Status | Git Commit | Key Artifacts / Features Built |
 | --- | --- | --- | --- | --- |
 | **Part 1** | Project Scaffold + Core UI Shell | **COMPLETED** | `43c5887` | Monorepo layout (`backend/`, `web/`, `mobile/`), Express `/health` API, M3 Design System Tokens, Web & Flutter UI shells with disabled future tabs (`PulseMeter*`, `Quizzes*`, `Forum*`). |
-| **Part 2** | Auth & Roles | **COMPLETED** | `1f3cb99`, `88dce29` | Neon PostgreSQL tables (`users`, `courses`, `classrooms`, `enrollments`, `sessions`, `attendance_records`), bcrypt password hashing, signed JWT auth API (`/auth/signup`, `/auth/login`, `/auth/me`), Web & Mobile Light-Mode login/signup screens, role middleware, ClassroomCard selection border fix. |
+| **Part 2** | Auth & Roles | **COMPLETED** | `1f3cb99`, `9d0a015` | Neon PostgreSQL tables (`users`, `courses`, `classrooms`, `enrollments`, `sessions`, `attendance_records`), bcrypt password hashing, signed JWT auth API (`/auth/signup`, `/auth/login`, `/auth/me`), Instructor-only Web dashboard restriction (`9d0a015`), Mobile Flutter Light-Mode login/signup screens. |
 | **Part 3** | Classroom Management & Join Flow | **IN PLANNING / READY TO BUILD** | — | Teacher classroom CRUD, course list, join code/link/QR generator; Student join flow (code, link, QR scan). |
 | **Part 4** | Attendance Session Engine | PENDING | — | Session start/stop, 3-QR token generator (HMAC), Redis token validation, ACL logging. |
 | **Part 5** | QR Display (Web) + Scanner (Flutter) | PENDING | — | Socket.io 3-QR rotation stream, Flutter ML Kit multi-frame camera decoder, live attendance marking. |
@@ -49,7 +49,7 @@ This project is built strictly according to the following 3 core specification f
 - **Database Schema**: Created automated initialization script (`backend/src/db/index.js`) executing `backend/src/db/schema.sql` on startup. Created tables `users`, `courses`, `classrooms`, `enrollments`, `sessions`, `attendance_records` and pre-seeded course catalog.
 - **Backend Auth Controller**: Created `backend/src/routes/auth.js` with `POST /auth/signup`, `POST /auth/login`, and `GET /auth/me`. Passwords hashed with `bcryptjs`, 7-day JWT tokens issued using `jsonwebtoken`.
 - **Auth Middleware**: Created `backend/src/middleware/auth.js` enforcing token verification and role restrictions (`teacher` vs `student`).
-- **Web App Auth**: Built `web/src/context/AuthContext.tsx`, Light Mode `/login` page, Light Mode `/signup` page with Role selector, and protected dashboard routing.
+- **Web App Scope Adjustment (Teacher-Only)**: Updated `web/src/app/login/page.tsx` and `web/src/app/signup/page.tsx` so Web Dashboard exclusively registers and logs in Instructor/Teacher accounts (`9d0a015`). Student accounts attempting Web login receive a friendly M3 Alert directing them to the Android mobile app.
 - **Mobile App Auth**: Built `mobile/lib/services/auth_service.dart`, Light Mode `LoginScreen`, Light Mode `SignupScreen` with Role segmented button, and stateful app routing.
 - **UI Polish**: Fixed `ClassroomCard` hover outline distortion by moving selection border directly into `Card` styling with `overflow: hidden` and smooth 0.15s border color transition (`88dce29`).
 - **Verification**: Tested signup/login for both Teacher and Student roles, verified `/auth/me` protected endpoint and 401 Unauthorized rejection. Web build and Flutter analysis passed cleanly.
