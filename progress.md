@@ -26,7 +26,7 @@ This project is built strictly according to the following 3 core specification f
 | **Part 3** | Classroom Management & Join Flow | **COMPLETED** | `4b60326` | `GET /courses`, `POST /classrooms`, `POST /classrooms/:id/regenerate-join`, `POST /classrooms/join`, `GET /classrooms/mine`, `GET /classrooms/:id/roster` REST endpoints; Web: `CreateClassroomDialog`, `ClassroomJoinDetailsModal` (join code + copyable link + code regeneration), `ClassroomRosterDialog`; Mobile: `ClassroomService`, `JoinClassroomDialog` widget; Live classroom grid on Instructor Dashboard. |
 | **Part 4** | Attendance Session Engine | **COMPLETED** | `1293fe9` | Upstash Redis connection & cache management, HMAC-SHA256 3-QR token generator with short-lived batches (15s TTL), `POST /sessions` (start), `POST /sessions/:id/end` (end), `GET /sessions/:id/active-tokens`, `POST /attendance/scan` (enforces order `[0,1,2]`, HMAC signature, $\le 10\text{s}$ freshness, enrollment, duplicate check, and logs ACL latency), `GET /attendance/session/:id`, `GET /attendance/me`, and Socket.io server integration. |
 | **Part 5** | QR Display (Web) + Scanner (Flutter) | **COMPLETED** | `4390a80` | Live Web 3-QR rotating projector (`LiveSessionModal.tsx`) with Socket.io real-time roster feed and ACL chips; Flutter multi-frame camera scanner (`QrScannerScreen.dart`) with 3-frame sequence buffer and instant Attendance Capture Latency display. |
-| **Part 6** | Homepages & Dashboards | PENDING | — | Attendance summary dashboards & student/teacher drill-down views using future-proof card grids. |
+| **Part 6** | Homepages & Dashboards | **COMPLETED** | `5959c99` | Teacher analytics dashboard (`AttendanceAnalyticsView.tsx`) with 4 top metrics, student attendance performance table, student drill-down modal, past sessions timeline, and future-proof card grid (`PulseMeter*`, `Quizzes*`, `Forum*`); Student mobile attendance dashboard (`attendance_dashboard_screen.dart`) with overall percentage card, per-subject breakdown, and interactive session history drill-downs. |
 | **Part 7** | CI/CD & Distribution | PENDING | — | GitHub Actions, Render & Vercel deployment, Firebase App Distribution signed APK pipeline. |
 
 ---
@@ -90,6 +90,23 @@ This project is built strictly according to the following 3 core specification f
   - Added "Scan Attendance QR" fast-action card on student home screen.
 - **Verification**: End-to-end Socket.io event delivery verified; Web build passed (`npm run build` compiled 6 static pages); Flutter analyze & tests passed with 0 issues.
 
+### Action 7: Homepages & Dashboards (Part 6) — Commit `5959c99`
+- **Backend Analytics Endpoints (`backend/src/routes/attendance.js`)**:
+  - `GET /attendance/classroom/:id/summary`: Returns section stats (total sessions, enrolled headcount, avg attendance %, avg ACL ms), past sessions log, and per-student performance.
+  - `GET /attendance/classroom/:id/student/:studentId`: Returns student-specific session attendance history and timestamps.
+  - `GET /attendance/me`: Returns student's overall attendance rate and per-course attendance records.
+- **Web Analytics & Drill-Downs (`web/src/components/AttendanceAnalyticsView.tsx`, `web/src/app/page.tsx`)**:
+  - 4 Metric Cards: Class Attendance %, Sessions Conducted, Enrolled Count, Avg Capture Latency.
+  - Student Attendance Table with progress bars and "View Log" drilldown modal.
+  - Past Sessions Timeline table with headcount and ACL latency metrics.
+  - Future Feature Hooks Card Grid: M3 cards for `PulseMeter*`, `Quizzes*`, `Forum*` with "Coming soon in Iteration 2" badges.
+- **Mobile Student Attendance Dashboard (`mobile/lib/screens/attendance_dashboard_screen.dart`, `mobile/lib/main.dart`)**:
+  - Overall attendance progress card with percentage and total sessions count.
+  - Enrolled subjects breakdown cards with individual attendance rate progress bars.
+  - Interactive bottom sheet drill-down showing chronological session history with ACL capture latencies.
+  - Stateful tab switching in `AppShell` connecting `[Classrooms]`, `[Attendance]`, and `[Profile]`.
+- **Verification**: API responses tested; Web Next.js build compiled successfully (`npm run build`); Flutter analyze & test passed with 0 errors.
+
 ---
 
 ## Instructions for Next AI Session / Handover
@@ -97,10 +114,9 @@ This project is built strictly according to the following 3 core specification f
 When resuming this project in a new AI assistant session or account:
 
 1. Read `progress.md`, [`prompt.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/prompt.md), [`technical_specification.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/technical_specification.md), and [`appearance_mode.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/appearance_mode.md).
-2. **Parts 1, 2, 3, 4, and 5 are fully complete, verified, and committed.**
-3. Begin directly with **Part 6 — Homepages & Dashboards**:
-   - Create implementation plan for Part 6.
-   - Build student combined attendance summary with per-subject drill-down views.
-   - Build teacher class-level attendance trends + per-student drill-down.
-   - Keep **Light Mode Only** strictly enforced across all UI components.
-   - Update `progress.md` after completing Part 6.
+2. **Parts 1 through 6 are fully complete, verified, and committed.**
+3. Begin with **Part 7 — CI/CD & Distribution**:
+   - Create GitHub Actions CI workflow (`.github/workflows/ci.yml`) for building and testing web, backend, and mobile.
+   - Configure deployment documentation / instructions for Render (backend), Vercel (web), and Firebase App Distribution (Android APK).
+   - Verify final definition of done for Iteration 1.
+   - Update `progress.md` upon completion.
