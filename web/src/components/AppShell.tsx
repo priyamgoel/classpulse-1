@@ -14,6 +14,9 @@ import {
   IconButton,
   Button,
   Stack,
+  Menu,
+  MenuItem,
+  Avatar,
 } from '@mui/material';
 import ClassIcon from '@mui/icons-material/Class';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
@@ -21,21 +24,31 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import QuizIcon from '@mui/icons-material/Quiz';
 import ForumIcon from '@mui/icons-material/Forum';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
-import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import LogoutIcon from '@mui/icons-material/Logout';
+import { useAuth } from '@/context/AuthContext';
 import { m3Tokens } from '@/theme/tokens';
 
 interface AppShellProps {
   children: React.ReactNode;
 }
 
-export type Role = 'teacher' | 'student';
-
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [activeTab, setActiveTab] = useState(0);
-  const [role, setRole] = useState<Role>('teacher');
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
-  const toggleRole = () => {
-    setRole((prev) => (prev === 'teacher' ? 'student' : 'teacher'));
+  const { user, logout } = useAuth();
+
+  const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleProfileMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    handleProfileMenuClose();
+    logout();
   };
 
   const navItems = [
@@ -44,7 +57,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
     { label: 'PulseMeter', icon: <SpeedIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Real-time feedback meter' },
     { label: 'Quizzes', icon: <QuizIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Live classroom quizzing' },
     { label: 'Forum', icon: <ForumIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Doubt resolution forum' },
-    { label: 'Profile', icon: <AccountCircleIcon />, disabled: false, tooltip: 'Account settings & roles' },
+    { label: 'Profile', icon: <AccountCircleIcon />, disabled: false, tooltip: 'Account settings & profile' },
   ];
 
   return (
@@ -63,31 +76,49 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             />
           </Stack>
 
-          {/* Role Preview Switcher */}
+          {/* User Profile & Role Info */}
           <Stack direction="row" spacing={2} alignItems="center">
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<SwapHorizIcon />}
-              onClick={toggleRole}
-              sx={{
-                borderRadius: m3Tokens.shape.full,
-                borderColor: m3Tokens.color.outline,
-                color: m3Tokens.color.onSurface,
-              }}
-            >
-              Role: <strong>{role === 'teacher' ? 'Teacher' : 'Student'}</strong>
-            </Button>
+            {user && (
+              <Chip
+                label={`Role: ${user.role.toUpperCase()}`}
+                color={user.role === 'teacher' ? 'primary' : 'secondary'}
+                size="small"
+                sx={{ fontWeight: 700 }}
+              />
+            )}
 
-            <Tooltip title="User Profile">
-              <IconButton color="primary">
-                <AccountCircleIcon fontSize="large" />
+            <Tooltip title="User Profile Menu">
+              <IconButton onClick={handleProfileMenuOpen} color="primary">
+                <Avatar sx={{ bgcolor: m3Tokens.color.primary, width: 36, height: 36, fontSize: '0.9rem' }}>
+                  {user?.full_name ? user.full_name[0].toUpperCase() : 'U'}
+                </Avatar>
               </IconButton>
             </Tooltip>
+
+            <Menu
+              anchorEl={anchorEl}
+              open={Boolean(anchorEl)}
+              onClose={handleProfileMenuClose}
+              transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+              anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+            >
+              <Box sx={{ px: 2, py: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                  {user?.full_name || 'Guest'}
+                </Typography>
+                <Typography variant="caption" sx={{ color: m3Tokens.color.secondary }}>
+                  {user?.email}
+                </Typography>
+              </Box>
+              <MenuItem onClick={handleLogout} sx={{ color: m3Tokens.color.error }}>
+                <LogoutIcon fontSize="small" sx={{ mr: 1 }} />
+                Sign Out
+              </MenuItem>
+            </Menu>
           </Stack>
         </Toolbar>
 
-        {/* Mirrored Primary Navigation Bar */}
+        {/* Primary Navigation Bar */}
         <Box sx={{ borderTop: `1px solid ${m3Tokens.color.outlineVariant}`, px: 2 }}>
           <Tabs
             value={activeTab}

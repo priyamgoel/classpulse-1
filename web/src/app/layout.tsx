@@ -4,6 +4,7 @@ import React from 'react';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { theme } from '@/theme/theme';
+import { AuthProvider } from '@/context/AuthContext';
 
 export default function RootLayout({
   children,
@@ -26,7 +27,7 @@ export default function RootLayout({
       <body style={{ margin: 0, padding: 0 }}>
         <ThemeProvider theme={theme}>
           <CssBaseline />
-          {children}
+          <AuthProvider>{children}</AuthProvider>
         </ThemeProvider>
       </body>
     </html>

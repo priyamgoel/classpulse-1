@@ -14,6 +14,9 @@ class M3Tokens {
   static const Color secondaryContainer = Color(0xFFE8DEF8);
   static const Color onSecondaryContainer = Color(0xFF1D192B);
   
+  static const Color error = Color(0xFFB3261E);
+  static const Color onError = Color(0xFFFFFFFF);
+  
   static const Color surface = Color(0xFFFEF7FF);
   static const Color onSurface = Color(0xFF1D1B20);
   static const Color surfaceVariant = Color(0xFFE7E0EC);

@@ -2,11 +2,20 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+const db = require('./db');
+const authRoutes = require('./routes/auth');
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(cors());
 app.use(express.json());
+
+// Initialize PostgreSQL database tables on startup
+db.initDb();
+
+// Mount API Routes
+app.use('/auth', authRoutes);
 
 // Health Check Endpoint (Part 1 Acceptance Requirement)
 app.get('/health', (req, res) => {

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'services/auth_service.dart';
+import 'screens/login_screen.dart';
+import 'screens/signup_screen.dart';
 import 'theme/tokens.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/classroom_card.dart';
@@ -8,14 +11,38 @@ void main() {
   runApp(const ClassPulseApp());
 }
 
-class ClassPulseApp extends StatelessWidget {
+class ClassPulseApp extends StatefulWidget {
   const ClassPulseApp({super.key});
+
+  @override
+  State<ClassPulseApp> createState() => _ClassPulseAppState();
+}
+
+class _ClassPulseAppState extends State<ClassPulseApp> {
+  bool _isAuthenticated = false;
+  bool _showSignup = false;
+
+  void _onAuthenticated() {
+    setState(() {
+      _isAuthenticated = true;
+    });
+  }
+
+  void _onLogout() {
+    AuthService.logout();
+    setState(() {
+      _isAuthenticated = false;
+      _showSignup = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ClassPulse Mobile',
       debugShowCheckedModeBanner: false,
+      // Strict Light Mode Only per appearance_mode.md
+      themeMode: ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -29,13 +56,33 @@ class ClassPulseApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
-      home: const ClassPulseHomePage(),
+      home: !_isAuthenticated
+          ? (_showSignup
+              ? SignupScreen(
+                  onSignupSuccess: _onAuthenticated,
+                  onNavigateToLogin: () {
+                    setState(() {
+                      _showSignup = false;
+                    });
+                  },
+                )
+              : LoginScreen(
+                  onLoginSuccess: _onAuthenticated,
+                  onNavigateToSignup: () {
+                    setState(() {
+                      _showSignup = true;
+                    });
+                  },
+                ))
+          : ClassPulseHomePage(onLogout: _onLogout),
     );
   }
 }
 
 class ClassPulseHomePage extends StatefulWidget {
-  const ClassPulseHomePage({super.key});
+  final VoidCallback onLogout;
+
+  const ClassPulseHomePage({super.key, required this.onLogout});
 
   @override
   State<ClassPulseHomePage> createState() => _ClassPulseHomePageState();
@@ -68,7 +115,6 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
   @override
   void initState() {
     super.initState();
-    // 4 Tabs reserved per Spec Section 7 (Overview active, 3 disabled hooks)
     _detailTabController = TabController(length: 4, vsync: this);
   }
 
@@ -80,25 +126,43 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
 
   @override
   Widget build(BuildContext context) {
+    final user = AuthService.currentUser;
+
     return AppShell(
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'My Classrooms',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: M3Tokens.onSurface,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Anti-Proxy Attendance Scanner Shell',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: M3Tokens.onSurfaceVariant,
-                  ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Welcome, ${user?.fullName ?? "User"}!',
+                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: M3Tokens.onSurface,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Role: ${user?.role.toUpperCase() ?? "STUDENT"}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: M3Tokens.secondary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout, color: M3Tokens.error),
+                  onPressed: widget.onLogout,
+                  tooltip: 'Sign Out',
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             ..._sampleClassrooms.map((c) => ClassroomCardWidget(
@@ -112,8 +176,6 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
                   onTap: () {},
                 )),
             const SizedBox(height: 16),
-
-            // Classroom Detail Hook (Spec Section 7)
             Container(
               decoration: BoxDecoration(
                 color: M3Tokens.surface,
@@ -153,10 +215,10 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
                     },
                   ),
                   const SizedBox(height: 16),
-                  const EmptyStateWidget(
+                  EmptyStateWidget(
                     title: 'No Active Scanner Session',
                     description: 'ML Kit 3-QR scanner will be activated here in Part 5.',
-                    actionLabel: 'Scan QR (Part 5)',
+                    actionLabel: user?.role == 'teacher' ? 'Start Session (Part 4)' : 'Scan QR Code (Part 5)',
                   ),
                 ],
               ),
