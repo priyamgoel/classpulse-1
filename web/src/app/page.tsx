@@ -80,33 +80,21 @@ export default function HomePage() {
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
           <Box>
             <Typography variant="h4" sx={{ color: m3Tokens.color.onSurface, mb: 0.5 }}>
-              Welcome, {user.full_name}!
+              Instructor Dashboard
             </Typography>
             <Typography variant="body1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-              Role: <strong>{user.role.toUpperCase()}</strong> — ClassPulse Iteration 1 Dashboard
+              Welcome back, <strong>{user.full_name}</strong> ({user.email})
             </Typography>
           </Box>
-          {user.role === 'teacher' ? (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<AddIcon />}
-              disabled
-              sx={{ opacity: 0.7 }}
-            >
-              Create Classroom (Part 3)
-            </Button>
-          ) : (
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<AddIcon />}
-              disabled
-              sx={{ opacity: 0.7 }}
-            >
-              Join Classroom (Part 3)
-            </Button>
-          )}
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            disabled
+            sx={{ opacity: 0.7 }}
+          >
+            Create Classroom (Part 3)
+          </Button>
         </Stack>
 
         <Grid container spacing={3}>
@@ -168,13 +156,13 @@ export default function HomePage() {
             <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
               <CheckCircleIcon color="success" />
               <Typography variant="body1" sx={{ color: m3Tokens.color.onSurface }}>
-                Authenticated as <strong>{user.email}</strong> ({user.role}). Classroom management ready for Part 3.
+                Authenticated as Instructor <strong>{user.email}</strong>. Classroom management engine ready for Part 3.
               </Typography>
             </Stack>
             <EmptyState
               title="No Active Attendance Session"
               description="Live anti-proxy QR attendance session engine will be activated in Part 4 & Part 5."
-              actionLabel={user.role === 'teacher' ? 'Start Attendance Session (Part 4)' : 'Scan QR Code (Part 5)'}
+              actionLabel="Start Attendance Session (Part 4)"
               onAction={() => {}}
             />
           </Box>

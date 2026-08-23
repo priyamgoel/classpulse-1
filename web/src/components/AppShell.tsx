@@ -12,7 +12,6 @@ import {
   Chip,
   Tooltip,
   IconButton,
-  Button,
   Stack,
   Menu,
   MenuItem,
@@ -70,27 +69,19 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               ClassPulse
             </Typography>
             <Chip
-              label="Iteration 1"
+              label="Instructor Dashboard"
               size="small"
-              sx={{ backgroundColor: m3Tokens.color.secondaryContainer, color: m3Tokens.color.onSecondaryContainer, fontSize: '0.7rem' }}
+              color="primary"
+              sx={{ fontWeight: 700, fontSize: '0.75rem' }}
             />
           </Stack>
 
-          {/* User Profile & Role Info */}
+          {/* User Profile & Logout Menu */}
           <Stack direction="row" spacing={2} alignItems="center">
-            {user && (
-              <Chip
-                label={`Role: ${user.role.toUpperCase()}`}
-                color={user.role === 'teacher' ? 'primary' : 'secondary'}
-                size="small"
-                sx={{ fontWeight: 700 }}
-              />
-            )}
-
-            <Tooltip title="User Profile Menu">
+            <Tooltip title="Instructor Account Options">
               <IconButton onClick={handleProfileMenuOpen} color="primary">
                 <Avatar sx={{ bgcolor: m3Tokens.color.primary, width: 36, height: 36, fontSize: '0.9rem' }}>
-                  {user?.full_name ? user.full_name[0].toUpperCase() : 'U'}
+                  {user?.full_name ? user.full_name[0].toUpperCase() : 'I'}
                 </Avatar>
               </IconButton>
             </Tooltip>
@@ -104,7 +95,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             >
               <Box sx={{ px: 2, py: 1 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                  {user?.full_name || 'Guest'}
+                  {user?.full_name || 'Instructor'}
                 </Typography>
                 <Typography variant="caption" sx={{ color: m3Tokens.color.secondary }}>
                   {user?.email}

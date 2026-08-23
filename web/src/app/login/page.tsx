@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
 import { useAuth } from '@/context/AuthContext';
 import { m3Tokens } from '@/theme/tokens';
 
@@ -24,7 +25,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,6 +37,22 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result.success) {
+      // Check if user is a student attempting to access Web Dashboard
+      const storedUser = localStorage.getItem('classpulse_user');
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          if (parsedUser.role === 'student') {
+            logout();
+            setError(
+              'Student accounts access ClassPulse via the Android mobile app. Please open the ClassPulse Android App on your phone to log in.'
+            );
+            return;
+          }
+        } catch {
+          // ignore error
+        }
+      }
       router.push('/');
     } else {
       setError(result.error || 'Login failed');
@@ -56,15 +73,19 @@ export default function LoginPage() {
       <Container maxWidth="xs">
         <Card sx={{ p: 2, borderRadius: m3Tokens.shape.large }}>
           <CardContent>
-            <Typography variant="h4" sx={{ color: m3Tokens.color.primary, fontWeight: 800, textAlign: 'center', mb: 1 }}>
+            <Typography variant="h4" sx={{ color: m3Tokens.color.primary, fontWeight: 800, textAlign: 'center', mb: 0.5 }}>
               ClassPulse
             </Typography>
-            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, textAlign: 'center', mb: 3 }}>
-              Sign in to your account
+            <Typography variant="subtitle2" sx={{ color: m3Tokens.color.secondary, fontWeight: 700, textAlign: 'center', mb: 3, textTransform: 'uppercase', letterSpacing: '1px' }}>
+              Instructor Dashboard
             </Typography>
 
             {error && (
-              <Alert severity="error" sx={{ mb: 2 }}>
+              <Alert
+                severity={error.includes('Android mobile app') ? 'info' : 'error'}
+                icon={error.includes('Android mobile app') ? <PhoneAndroidIcon fontSize="inherit" /> : undefined}
+                sx={{ mb: 2.5 }}
+              >
                 {error}
               </Alert>
             )}
@@ -72,7 +93,7 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit}>
               <Stack spacing={2.5}>
                 <TextField
-                  label="Email Address"
+                  label="Instructor Email"
                   type="email"
                   fullWidth
                   required
@@ -95,16 +116,16 @@ export default function LoginPage() {
                   size="large"
                   disabled={loading}
                 >
-                  {loading ? 'Signing in...' : 'Sign In'}
+                  {loading ? 'Signing in...' : 'Sign In as Instructor'}
                 </Button>
               </Stack>
             </form>
 
             <Box sx={{ mt: 3, textAlign: 'center' }}>
               <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-                Don't have an account?{' '}
+                New Instructor?{' '}
                 <MuiLink component={Link} href="/signup" underline="hover" sx={{ fontWeight: 700 }}>
-                  Sign Up
+                  Register Instructor Account
                 </MuiLink>
               </Typography>
             </Box>
