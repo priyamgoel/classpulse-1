@@ -28,8 +28,8 @@ class User {
 }
 
 class AuthService {
-  // Default to localhost for emulator/local testing (or 10.0.2.2 for Android emulator)
-  static String baseUrl = 'http://10.0.2.2:4000';
+  // Laptop Wi-Fi IP address for physical phone and local emulator testing
+  static String baseUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://192.168.1.4:4000');
 
   static String? _token;
   static User? _currentUser;
