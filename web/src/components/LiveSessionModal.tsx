@@ -32,6 +32,7 @@ import FlashOnIcon from '@mui/icons-material/FlashOn';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SecurityIcon from '@mui/icons-material/Security';
+import SpeedIcon from '@mui/icons-material/Speed';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens } from '@/theme/tokens';
@@ -94,6 +95,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [rotationSpeedMs, setRotationSpeedMs] = useState<number>(800); // 800ms (Default), 300ms (Fast), 100ms (Ultra-Fast)
 
   const socketRef = useRef<Socket | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -143,7 +145,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     };
   }, [open, session]);
 
-  // 2. High-speed 3-QR frame rotation (every 800ms)
+  // 2. Configurable Dynamic 3-QR frame rotation (800ms / 300ms / 100ms)
   useEffect(() => {
     if (!open || !tokenBatch || tokenBatch.tokens.length === 0) return;
 
@@ -151,12 +153,12 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
 
     rotationIntervalRef.current = setInterval(() => {
       setCurrentFrameIdx((prev) => (prev + 1) % 3);
-    }, 800);
+    }, rotationSpeedMs);
 
     return () => {
       if (rotationIntervalRef.current) clearInterval(rotationIntervalRef.current);
     };
-  }, [open, tokenBatch]);
+  }, [open, tokenBatch, rotationSpeedMs]);
 
   const fetchRoster = async (sessionId: string) => {
     try {
@@ -262,7 +264,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
           overflow: 'hidden',
         }}
       >
-        {/* Left Side Panel: Course Info & 3-Frame Stream Tracker */}
+        {/* Left Side Panel: Course Info, 3-Frame Tracker & Rotation Speed Selector */}
         <Paper
           elevation={0}
           sx={{
@@ -340,6 +342,36 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                 );
               })}
             </Stack>
+
+            {/* Rotation Speed Selector */}
+            <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', mt: 2, mb: 1 }}>
+              Stream Rotation Speed
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              {[
+                { label: '800ms', value: 800, desc: 'Normal' },
+                { label: '300ms', value: 300, desc: 'Fast' },
+                { label: '100ms', value: 100, desc: 'Ultra' },
+              ].map((opt) => (
+                <Button
+                  key={opt.value}
+                  size="small"
+                  variant={rotationSpeedMs === opt.value ? 'contained' : 'outlined'}
+                  onClick={() => setRotationSpeedMs(opt.value)}
+                  sx={{
+                    flex: 1,
+                    py: 0.5,
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    borderRadius: '8px',
+                    minWidth: 0,
+                    px: 0.5,
+                  }}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </Stack>
           </Box>
 
           <Box>
@@ -353,13 +385,13 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               }}
             >
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.25 }}>
-                <SecurityIcon sx={{ fontSize: 16, color: m3Tokens.color.primary }} />
+                <SpeedIcon sx={{ fontSize: 16, color: m3Tokens.color.primary }} />
                 <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary, fontSize: '0.75rem' }}>
-                  ANTI-PROXY VERIFICATION
+                  ROTATING AT {rotationSpeedMs}MS
                 </Typography>
               </Stack>
               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', fontSize: '0.7rem', lineHeight: 1.3 }}>
-                Stream rotates every 800ms. Mobile app buffers all 3 frames. Use 1x-20x zoom from back seats.
+                Tokens refresh every 10s. Stream flips frames at {rotationSpeedMs}ms for fast camera capture.
               </Typography>
             </Paper>
           </Box>
@@ -548,7 +580,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   }
 
   // -------------------------------------------------------------
-  // Standard Modal View (With 1-Click Fullscreen Button)
+  // Standard Modal View (With 1-Click Fullscreen Button & Speed Toggle)
   // -------------------------------------------------------------
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
@@ -610,7 +642,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.primary, mb: 0.5 }}>
                 Anti-Proxy Rotating 3-QR Stream
               </Typography>
-              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2, maxWidth: 420 }}>
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 1.5, maxWidth: 420 }}>
                 Low-density matrix enabled for high-distance scanning.
               </Typography>
 
@@ -623,20 +655,20 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                   border: `1px solid ${m3Tokens.color.outlineVariant}`,
                   boxShadow: '0px 4px 20px rgba(0, 0, 0, 0.06)',
                   display: 'inline-block',
-                  mb: 2,
+                  mb: 1.5,
                 }}
               >
                 {qrStringPayload ? (
                   <QRCodeSVG
                     value={qrStringPayload}
-                    size={320}
+                    size={300}
                     level="L" // Low error correction = Chunky scannable blocks
                     includeMargin={true}
                     fgColor="#000000"
                     bgColor="#FFFFFF"
                   />
                 ) : (
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 320, height: 320 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 300, height: 300 }}>
                     <CircularProgress />
                   </Box>
                 )}
@@ -660,8 +692,30 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                 ))}
               </Stack>
 
+              {/* Rotation Speed Selector */}
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: m3Tokens.color.onSurfaceVariant }}>
+                  Speed:
+                </Typography>
+                {[
+                  { label: '800ms', value: 800 },
+                  { label: '300ms', value: 300 },
+                  { label: '100ms', value: 100 },
+                ].map((opt) => (
+                  <Chip
+                    key={opt.value}
+                    label={opt.label}
+                    size="small"
+                    color={rotationSpeedMs === opt.value ? 'primary' : 'default'}
+                    variant={rotationSpeedMs === opt.value ? 'filled' : 'outlined'}
+                    onClick={() => setRotationSpeedMs(opt.value)}
+                    sx={{ fontWeight: 700, cursor: 'pointer' }}
+                  />
+                ))}
+              </Stack>
+
               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-                Rotating every 800ms • Tip: Click <strong>"Fullscreen Projector"</strong> for large lecture halls
+                Tip: Click <strong>"Fullscreen Projector"</strong> for large lecture halls
               </Typography>
             </Paper>
           </Grid>
