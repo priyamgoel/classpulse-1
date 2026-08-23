@@ -17,7 +17,7 @@ This project is built strictly according to the following 3 core specification f
 
 ---
 
-## Overall Build Status
+## Overall Build Status — Iteration 1 (100% Completed)
 
 | Part | Name | Status | Git Commit | Key Artifacts / Features Built |
 | --- | --- | --- | --- | --- |
@@ -27,7 +27,7 @@ This project is built strictly according to the following 3 core specification f
 | **Part 4** | Attendance Session Engine | **COMPLETED** | `1293fe9` | Upstash Redis connection & cache management, HMAC-SHA256 3-QR token generator with short-lived batches (15s TTL), `POST /sessions` (start), `POST /sessions/:id/end` (end), `GET /sessions/:id/active-tokens`, `POST /attendance/scan` (enforces order `[0,1,2]`, HMAC signature, $\le 10\text{s}$ freshness, enrollment, duplicate check, and logs ACL latency), `GET /attendance/session/:id`, `GET /attendance/me`, and Socket.io server integration. |
 | **Part 5** | QR Display (Web) + Scanner (Flutter) | **COMPLETED** | `4390a80` | Live Web 3-QR rotating projector (`LiveSessionModal.tsx`) with Socket.io real-time roster feed and ACL chips; Flutter multi-frame camera scanner (`QrScannerScreen.dart`) with 3-frame sequence buffer and instant Attendance Capture Latency display. |
 | **Part 6** | Homepages & Dashboards | **COMPLETED** | `5959c99` | Teacher analytics dashboard (`AttendanceAnalyticsView.tsx`) with 4 top metrics, student attendance performance table, student drill-down modal, past sessions timeline, and future-proof card grid (`PulseMeter*`, `Quizzes*`, `Forum*`); Student mobile attendance dashboard (`attendance_dashboard_screen.dart`) with overall percentage card, per-subject breakdown, and interactive session history drill-downs. |
-| **Part 7** | CI/CD & Distribution | PENDING | — | GitHub Actions, Render & Vercel deployment, Firebase App Distribution signed APK pipeline. |
+| **Part 7** | CI/CD & Distribution | **COMPLETED** | `10682c8` | GitHub Actions multi-job pipeline (`.github/workflows/ci.yml`) for automated backend, web, and mobile testing & APK generation; Android camera & internet permissions; and comprehensive [`DEPLOYMENT_GUIDE.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/DEPLOYMENT_GUIDE.md). |
 
 ---
 
@@ -107,16 +107,23 @@ This project is built strictly according to the following 3 core specification f
   - Stateful tab switching in `AppShell` connecting `[Classrooms]`, `[Attendance]`, and `[Profile]`.
 - **Verification**: API responses tested; Web Next.js build compiled successfully (`npm run build`); Flutter analyze & test passed with 0 errors.
 
+### Action 8: CI/CD & Distribution (Part 7) — Commit `10682c8`
+- **GitHub Actions Multi-Job Pipeline (`.github/workflows/ci.yml`)**:
+  - Automated CI workflow executing on every push to `main`: `backend-ci` (Node 20), `web-ci` (Next.js production build), and `mobile-ci` (Java 17, Flutter 3.x, analyze, test, and debug APK build).
+- **Android Permissions & Configuration**: Configured `INTERNET`, `CAMERA`, and autofocus hardware features in `mobile/android/app/src/main/AndroidManifest.xml` with app label `ClassPulse`.
+- **Deployment Documentation (`DEPLOYMENT_GUIDE.md`)**: Comprehensive instructions covering local running, Render backend hosting, Vercel web hosting, and Firebase App Distribution for pilot Android APK rollouts.
+
 ---
 
 ## Instructions for Next AI Session / Handover
 
 When resuming this project in a new AI assistant session or account:
 
-1. Read `progress.md`, [`prompt.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/prompt.md), [`technical_specification.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/technical_specification.md), and [`appearance_mode.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/appearance_mode.md).
-2. **Parts 1 through 6 are fully complete, verified, and committed.**
-3. Begin with **Part 7 — CI/CD & Distribution**:
-   - Create GitHub Actions CI workflow (`.github/workflows/ci.yml`) for building and testing web, backend, and mobile.
-   - Configure deployment documentation / instructions for Render (backend), Vercel (web), and Firebase App Distribution (Android APK).
-   - Verify final definition of done for Iteration 1.
-   - Update `progress.md` upon completion.
+1. Read `progress.md`, [`prompt.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/prompt.md), [`technical_specification.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/technical_specification.md), [`appearance_mode.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/appearance_mode.md), and [`DEPLOYMENT_GUIDE.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/DEPLOYMENT_GUIDE.md).
+2. **Iteration 1 is 100% built, verified, and committed.**
+3. To test or demonstrate:
+   - Backend: `cd backend && npm run dev`
+   - Web: `cd web && npm run dev`
+   - Mobile: `cd mobile && flutter run`
+4. If the user asks to deploy to cloud, follow the step-by-step instructions in `DEPLOYMENT_GUIDE.md` for Render, Vercel, and Firebase App Distribution.
+5. If the user asks to start Iteration 2, refer to Section 7 of `technical_specification.md` (`PulseMeter`, `Live Quizzing`, `Doubt Forum`).
