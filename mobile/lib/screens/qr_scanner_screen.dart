@@ -259,8 +259,12 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     setState(() {
       _currentZoomFactor = factor;
     });
-    // Map 1x -> 0.0, 2x -> 0.4, 3x -> 0.8 scale on MobileScanner
-    final scale = factor == 1.0 ? 0.0 : (factor == 2.0 ? 0.4 : 0.8);
+    // Map 1x -> 0.0, 2x -> 0.3, 3x -> 0.6, 5x -> 1.0 (max) scale on MobileScanner
+    final scale = factor == 1.0
+        ? 0.0
+        : (factor == 2.0
+            ? 0.3
+            : (factor == 3.0 ? 0.6 : 1.0));
     try {
       _cameraController.setZoomScale(scale);
     } catch (_) {}
@@ -310,7 +314,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             ),
           ),
 
-          // 3. Quick Zoom Selector Floating Buttons (1x, 2x, 3x) for Back-Bench Scanning
+          // 3. Quick Zoom Selector Floating Buttons (1x, 2x, 3x, 5x) for Back-Bench Scanning
           Positioned(
             top: 20,
             left: 0,
@@ -319,18 +323,18 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.65),
+                  color: Colors.black.withValues(alpha: 0.7),
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: Colors.white24),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: [1.0, 2.0, 3.0].map((zoom) {
+                  children: [1.0, 2.0, 3.0, 5.0].map((zoom) {
                     final isSelected = _currentZoomFactor == zoom;
                     return GestureDetector(
                       onTap: () => _setZoomLevel(zoom),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: isSelected ? M3Tokens.primary : Colors.transparent,
                           borderRadius: BorderRadius.circular(20),

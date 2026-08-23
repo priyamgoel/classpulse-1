@@ -31,6 +31,7 @@ import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
+import SecurityIcon from '@mui/icons-material/Security';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens } from '@/theme/tokens';
@@ -97,7 +98,6 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const socketRef = useRef<Socket | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const rotationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const fullscreenContainerRef = useRef<HTMLDivElement | null>(null);
 
   // 1. Initialize Socket.io & Fetch Existing Roster
   useEffect(() => {
@@ -239,12 +239,11 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     : '';
 
   // -------------------------------------------------------------
-  // Fullscreen Theater / Projector View
+  // Fullscreen Theater / Projector View (Max Top-to-Bottom QR + Side Panels)
   // -------------------------------------------------------------
   if (isFullscreen) {
     return (
       <Box
-        ref={fullscreenContainerRef}
         sx={{
           position: 'fixed',
           top: 0,
@@ -254,124 +253,288 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
           bgcolor: '#FFFFFF',
           zIndex: 9999,
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
+          flexDirection: 'row',
+          alignItems: 'stretch',
           justifyContent: 'space-between',
-          p: 3,
+          p: 2.5,
+          gap: 2.5,
           boxSizing: 'border-box',
+          overflow: 'hidden',
         }}
       >
-        {/* Fullscreen Header */}
-        <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Chip label="LIVE PROJECTOR MODE" color="error" sx={{ fontWeight: 900, fontSize: '0.85rem' }} />
-            <Typography variant="h5" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
-              {session.course_code}: {session.course_name}
+        {/* Left Side Panel: Course Info & 3-Frame Stream Tracker */}
+        <Paper
+          elevation={0}
+          sx={{
+            width: '24%',
+            minWidth: 260,
+            maxWidth: 320,
+            p: 3,
+            borderRadius: '20px',
+            border: `1px solid ${m3Tokens.color.outlineVariant}`,
+            bgcolor: m3Tokens.color.background,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Box>
+            <Chip
+              label="PROJECTOR STREAM"
+              color="error"
+              sx={{ fontWeight: 900, fontSize: '0.75rem', mb: 2 }}
+            />
+            <Typography variant="h5" sx={{ fontWeight: 900, color: m3Tokens.color.onSurface, lineHeight: 1.2, mb: 1 }}>
+              {session.course_code}
             </Typography>
-            <Typography variant="subtitle1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, mb: 0.5 }}>
+              {session.course_name}
+            </Typography>
+            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2 }}>
               Section: <strong>{session.section_name}</strong>
             </Typography>
-          </Stack>
-          <Stack direction="row" spacing={1.5}>
-            <Button
-              variant="outlined"
-              startIcon={<FullscreenExitIcon />}
-              onClick={toggleFullscreen}
-            >
-              Exit Fullscreen
-            </Button>
-            <Button
-              variant="contained"
-              color="error"
-              onClick={handleEndSession}
-              disabled={ending}
-            >
-              {ending ? 'Ending...' : 'End Session'}
-            </Button>
-          </Stack>
-        </Box>
+            <Divider sx={{ my: 2 }} />
 
-        {/* Center: Massive Chunky QR Code */}
-        <Box sx={{ textAlign: 'center', my: 'auto' }}>
+            <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', mb: 1.5 }}>
+              Active Rotating Frames
+            </Typography>
+
+            <Stack spacing={1.5}>
+              {[0, 1, 2].map((idx) => {
+                const isActive = currentFrameIdx === idx;
+                return (
+                  <Paper
+                    key={idx}
+                    elevation={0}
+                    sx={{
+                      p: 1.5,
+                      borderRadius: '12px',
+                      border: `2px solid ${isActive ? m3Tokens.color.primary : m3Tokens.color.outlineVariant}`,
+                      bgcolor: isActive ? m3Tokens.color.primaryContainer : '#FFFFFF',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transform: isActive ? 'scale(1.03)' : 'scale(1)',
+                      transition: 'all 0.15s ease-in-out',
+                    }}
+                  >
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                      <Box
+                        sx={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: '50%',
+                          bgcolor: isActive ? m3Tokens.color.primary : 'grey.400',
+                        }}
+                      />
+                      <Typography variant="body2" sx={{ fontWeight: isActive ? 800 : 600, color: isActive ? m3Tokens.color.onPrimaryContainer : m3Tokens.color.onSurface }}>
+                        Frame {idx + 1} of 3
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: isActive ? m3Tokens.color.primary : m3Tokens.color.onSurfaceVariant }}>
+                      {isActive ? 'TRANSMITTING' : 'QUEUED'}
+                    </Typography>
+                  </Paper>
+                );
+              })}
+            </Stack>
+          </Box>
+
+          <Box>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                borderRadius: '12px',
+                bgcolor: '#FFFFFF',
+                border: `1px solid ${m3Tokens.color.outlineVariant}`,
+              }}
+            >
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                <SecurityIcon sx={{ fontSize: 18, color: m3Tokens.color.primary }} />
+                <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary }}>
+                  ANTI-PROXY VERIFICATION
+                </Typography>
+              </Stack>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', fontSize: '0.75rem', lineHeight: 1.3 }}>
+                Stream rotates every 800ms. Mobile app automatically buffers all 3 sequential frames.
+              </Typography>
+            </Paper>
+          </Box>
+        </Paper>
+
+        {/* Center: Massive Top-to-Bottom QR Code (Dominates the Screen Height) */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+          }}
+        >
           <Box
             sx={{
-              p: 3,
+              p: 2.5,
               bgcolor: '#FFFFFF',
-              borderRadius: '24px',
-              border: `4px solid ${m3Tokens.color.primary}`,
-              boxShadow: '0px 10px 40px rgba(0, 0, 0, 0.12)',
-              display: 'inline-block',
+              borderRadius: '28px',
+              border: `5px solid ${m3Tokens.color.primary}`,
+              boxShadow: '0px 12px 50px rgba(0, 0, 0, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              maxHeight: 'calc(94vh - 20px)',
+              maxWidth: 'calc(94vh - 20px)',
+              aspectRatio: '1/1',
+              boxSizing: 'border-box',
             }}
           >
             {qrStringPayload ? (
               <QRCodeSVG
                 value={qrStringPayload}
-                size={540}
-                level="L" // Low error correction = biggest, thickest scannable dots
+                size={700}
+                style={{ width: '100%', height: '100%' }}
+                level="L" // Low error correction = Biggest, chunkiest dots for long distance
                 includeMargin={true}
                 fgColor="#000000"
                 bgColor="#FFFFFF"
               />
             ) : (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 540, height: 540 }}>
-                <CircularProgress size={60} />
-              </Box>
+              <CircularProgress size={80} />
             )}
           </Box>
-
-          {/* Rotating Frame Status Tracker */}
-          <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2.5 }}>
-            {[0, 1, 2].map((idx) => (
-              <Chip
-                key={idx}
-                label={`Frame ${idx + 1} / 3`}
-                color={currentFrameIdx === idx ? 'primary' : 'default'}
-                variant={currentFrameIdx === idx ? 'filled' : 'outlined'}
-                sx={{
-                  fontWeight: 800,
-                  fontSize: '1rem',
-                  py: 2.5,
-                  px: 2,
-                  borderRadius: '12px',
-                  transform: currentFrameIdx === idx ? 'scale(1.15)' : 'scale(1)',
-                  transition: 'all 0.15s ease-in-out',
-                }}
-              />
-            ))}
-          </Stack>
         </Box>
 
-        {/* Fullscreen Bottom Roster Ribbon */}
-        <Box
+        {/* Right Side Panel: Live Real-Time Roster & Session Controls */}
+        <Paper
+          elevation={0}
           sx={{
-            width: '100%',
-            maxWidth: 1100,
-            p: 1.5,
-            bgcolor: m3Tokens.color.background,
-            borderRadius: '16px',
+            width: '26%',
+            minWidth: 280,
+            maxWidth: 360,
+            p: 2.5,
+            borderRadius: '20px',
             border: `1px solid ${m3Tokens.color.outlineVariant}`,
+            bgcolor: '#FFFFFF',
             display: 'flex',
-            alignItems: 'center',
+            flexDirection: 'column',
             justifyContent: 'space-between',
           }}
         >
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Chip
-              icon={<CheckCircleIcon sx={{ fontSize: '1.1rem !important' }} />}
-              label={`${attendees.length} Students Present`}
-              color="success"
-              sx={{ fontWeight: 800, fontSize: '0.9rem', py: 1.5 }}
-            />
-            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-              {attendees.length > 0
-                ? `Latest: ${attendees[0].student.full_name} (${attendees[0].acl_ms ? `${attendees[0].acl_ms}ms ACL` : 'recorded'})`
-                : 'Point mobile camera at projector to get marked PRESENT'}
+          {/* Top Controls */}
+          <Box>
+            <Stack direction="row" spacing={1} sx={{ mb: 2.5 }}>
+              <Button
+                fullWidth
+                variant="outlined"
+                startIcon={<FullscreenExitIcon />}
+                onClick={toggleFullscreen}
+                sx={{ borderRadius: '10px' }}
+              >
+                Exit Fullscreen
+              </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                color="error"
+                onClick={handleEndSession}
+                disabled={ending}
+                sx={{ borderRadius: '10px', fontWeight: 700 }}
+              >
+                {ending ? 'Ending...' : 'End Session'}
+              </Button>
+            </Stack>
+
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                mb: 2,
+                borderRadius: '12px',
+                bgcolor: 'success.light',
+                color: 'success.dark',
+                textAlign: 'center',
+              }}
+            >
+              <Typography variant="h3" sx={{ fontWeight: 900, color: 'success.dark', lineHeight: 1 }}>
+                {attendees.length}
+              </Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 0.5 }}>
+                Students Marked Present
+              </Typography>
+            </Paper>
+
+            <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.onSurfaceVariant, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Live Real-Time Feed
             </Typography>
-          </Stack>
-          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-            Anti-Proxy HMAC-SHA256 • Low-Density Optimized Matrix
+          </Box>
+
+          {/* Real-time Student List */}
+          <Box sx={{ flex: 1, overflowY: 'auto', my: 1.5, pr: 0.5 }}>
+            {attendees.length === 0 ? (
+              <Box sx={{ py: 6, textAlign: 'center' }}>
+                <QrCodeScannerIcon sx={{ fontSize: 40, color: 'grey.400', mb: 1 }} />
+                <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurfaceVariant }}>
+                  Awaiting Scans...
+                </Typography>
+                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                  Students scanning with 1x-5x zoom will appear here instantly.
+                </Typography>
+              </Box>
+            ) : (
+              <List dense sx={{ p: 0 }}>
+                {attendees.map((attendee, idx) => (
+                  <React.Fragment key={attendee.id || idx}>
+                    <ListItem
+                      alignItems="flex-start"
+                      sx={{
+                        px: 1,
+                        py: 0.75,
+                        borderRadius: '8px',
+                        '&:hover': { bgcolor: m3Tokens.color.surfaceVariant },
+                      }}
+                    >
+                      <ListItemAvatar sx={{ minWidth: 36 }}>
+                        <Avatar sx={{ width: 28, height: 28, bgcolor: m3Tokens.color.primary, fontSize: '0.75rem' }}>
+                          <PersonIcon fontSize="small" />
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                            {attendee.student.full_name}
+                          </Typography>
+                        }
+                        secondary={
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.25 }}>
+                            <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                              {attendee.student.email}
+                            </Typography>
+                            {attendee.acl_ms !== undefined && (
+                              <Chip
+                                icon={<FlashOnIcon sx={{ fontSize: '0.7rem !important' }} />}
+                                label={`${attendee.acl_ms}ms`}
+                                size="small"
+                                color="secondary"
+                                sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700 }}
+                              />
+                            )}
+                          </Stack>
+                        }
+                      />
+                    </ListItem>
+                    {idx < attendees.length - 1 && <Divider component="li" />}
+                  </React.Fragment>
+                ))}
+              </List>
+            )}
+          </Box>
+
+          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, textAlign: 'center', display: 'block' }}>
+            Socket.io Real-Time Connection Active
           </Typography>
-        </Box>
+        </Paper>
       </Box>
     );
   }
