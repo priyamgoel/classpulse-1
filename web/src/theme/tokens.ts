@@ -28,15 +28,15 @@ export const m3Tokens = {
     outlineVariant: '#CAC4D0',
   },
   shape: {
-    none: 0,
-    extraSmall: 4,
-    small: 8,
-    medium: 12,
-    large: 16,
-    extraLarge: 28,
-    full: 9999,
+    none: '0px',
+    extraSmall: '4px',
+    small: '8px',
+    medium: '12px',
+    large: '16px',
+    extraLarge: '24px',
+    full: '9999px',
   },
   typography: {
     fontFamily: '"Roboto", "Segoe UI", "Helvetica", "Arial", sans-serif',
-  }
+  },
 };

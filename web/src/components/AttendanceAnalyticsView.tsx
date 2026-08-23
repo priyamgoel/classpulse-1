@@ -23,7 +23,6 @@ import {
   CircularProgress,
   Divider,
   IconButton,
-  Tooltip,
 } from '@mui/material';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -136,7 +135,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
   }
 
   return (
-    <Box>
+    <Box sx={{ width: '100%' }}>
       {/* 1. Metric Cards Grid */}
       <Grid container spacing={2.5} sx={{ mb: 3.5 }}>
         {/* Class Attendance Rate */}
@@ -145,9 +144,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             elevation={0}
             sx={{
               p: 2.5,
-              borderRadius: m3Tokens.shape.medium,
+              borderRadius: '12px',
               border: `1px solid ${m3Tokens.color.outlineVariant}`,
-              bgcolor: m3Tokens.color.surface,
+              bgcolor: '#FFFFFF',
             }}
           >
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -171,9 +170,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             elevation={0}
             sx={{
               p: 2.5,
-              borderRadius: m3Tokens.shape.medium,
+              borderRadius: '12px',
               border: `1px solid ${m3Tokens.color.outlineVariant}`,
-              bgcolor: m3Tokens.color.surface,
+              bgcolor: '#FFFFFF',
             }}
           >
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -197,9 +196,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             elevation={0}
             sx={{
               p: 2.5,
-              borderRadius: m3Tokens.shape.medium,
+              borderRadius: '12px',
               border: `1px solid ${m3Tokens.color.outlineVariant}`,
-              bgcolor: m3Tokens.color.surface,
+              bgcolor: '#FFFFFF',
             }}
           >
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -223,9 +222,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             elevation={0}
             sx={{
               p: 2.5,
-              borderRadius: m3Tokens.shape.medium,
+              borderRadius: '12px',
               border: `1px solid ${m3Tokens.color.outlineVariant}`,
-              bgcolor: m3Tokens.color.surface,
+              bgcolor: '#FFFFFF',
             }}
           >
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
@@ -248,9 +247,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
       <Paper
         elevation={0}
         sx={{
-          borderRadius: m3Tokens.shape.large,
+          borderRadius: '12px',
           border: `1px solid ${m3Tokens.color.outlineVariant}`,
-          bgcolor: m3Tokens.color.surface,
+          bgcolor: '#FFFFFF',
           overflow: 'hidden',
           mb: 3.5,
         }}
@@ -318,7 +317,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                             variant="determinate"
                             value={Math.min(100, pct)}
                             color={pct >= 75 ? 'success' : 'warning'}
-                            sx={{ height: 6, borderRadius: 3 }}
+                            sx={{ height: 6, borderRadius: '3px' }}
                           />
                         </Stack>
                       </TableCell>
@@ -358,9 +357,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
       <Paper
         elevation={0}
         sx={{
-          borderRadius: m3Tokens.shape.large,
+          borderRadius: '12px',
           border: `1px solid ${m3Tokens.color.outlineVariant}`,
-          bgcolor: m3Tokens.color.surface,
+          bgcolor: '#FFFFFF',
           overflow: 'hidden',
         }}
       >
@@ -440,7 +439,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: 700, bgcolor: m3Tokens.color.surface, borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+        <DialogTitle sx={{ fontWeight: 700, bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
@@ -474,9 +473,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                     elevation={0}
                     sx={{
                       p: 2,
-                      borderRadius: m3Tokens.shape.medium,
+                      borderRadius: '8px',
                       border: `1px solid ${m3Tokens.color.outlineVariant}`,
-                      bgcolor: m3Tokens.color.surface,
+                      bgcolor: '#FFFFFF',
                     }}
                   >
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -515,7 +514,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             </Stack>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 2, bgcolor: m3Tokens.color.surface, borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+        <DialogActions sx={{ p: 2, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
           <Button onClick={() => setDrilldownStudent(null)} variant="contained">
             Close
           </Button>

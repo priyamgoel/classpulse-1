@@ -15,17 +15,14 @@ import {
   CircularProgress,
   IconButton,
   Alert,
-  Divider,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import QrCodeIcon from '@mui/icons-material/QrCode';
 import PeopleIcon from '@mui/icons-material/People';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import QuizIcon from '@mui/icons-material/Quiz';
 import ForumIcon from '@mui/icons-material/Forum';
-import AnalyticsIcon from '@mui/icons-material/Analytics';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { AppShell } from '@/components/AppShell';
@@ -147,7 +144,7 @@ export default function HomePage() {
       <Box sx={{ mb: 4 }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
           <Box>
-            <Typography variant="h4" sx={{ color: m3Tokens.color.onSurface, mb: 0.5 }}>
+            <Typography variant="h4" sx={{ color: m3Tokens.color.onSurface, mb: 0.5, fontWeight: 700 }}>
               Instructor Dashboard
             </Typography>
             <Typography variant="body1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
@@ -235,7 +232,16 @@ export default function HomePage() {
       </Box>
 
       {selectedClassroom && (
-        <Paper sx={{ p: 3, mb: 4, borderRadius: m3Tokens.shape.large, border: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+        <Paper
+          elevation={0}
+          sx={{
+            p: 3,
+            mb: 4,
+            borderRadius: '16px',
+            border: `1px solid ${m3Tokens.color.outlineVariant}`,
+            bgcolor: '#FFFFFF',
+          }}
+        >
           <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 2.5 }}>
             <Box>
               <Typography variant="caption" sx={{ color: m3Tokens.color.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -316,9 +322,9 @@ export default function HomePage() {
               elevation={0}
               sx={{
                 p: 2.5,
-                borderRadius: m3Tokens.shape.medium,
+                borderRadius: '12px',
                 border: `1px dashed ${m3Tokens.color.outlineVariant}`,
-                bgcolor: m3Tokens.color.surfaceVariant,
+                bgcolor: '#FFFFFF',
                 opacity: 0.85,
               }}
             >
@@ -342,9 +348,9 @@ export default function HomePage() {
               elevation={0}
               sx={{
                 p: 2.5,
-                borderRadius: m3Tokens.shape.medium,
+                borderRadius: '12px',
                 border: `1px dashed ${m3Tokens.color.outlineVariant}`,
-                bgcolor: m3Tokens.color.surfaceVariant,
+                bgcolor: '#FFFFFF',
                 opacity: 0.85,
               }}
             >
@@ -368,9 +374,9 @@ export default function HomePage() {
               elevation={0}
               sx={{
                 p: 2.5,
-                borderRadius: m3Tokens.shape.medium,
+                borderRadius: '12px',
                 border: `1px dashed ${m3Tokens.color.outlineVariant}`,
-                bgcolor: m3Tokens.color.surfaceVariant,
+                bgcolor: '#FFFFFF',
                 opacity: 0.85,
               }}
             >

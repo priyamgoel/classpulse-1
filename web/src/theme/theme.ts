@@ -20,7 +20,7 @@ export const theme = createTheme({
     },
     background: {
       default: m3Tokens.color.background,
-      paper: m3Tokens.color.surface,
+      paper: '#FFFFFF',
     },
     text: {
       primary: m3Tokens.color.onSurface,
@@ -29,7 +29,7 @@ export const theme = createTheme({
     divider: m3Tokens.color.outlineVariant,
   },
   shape: {
-    borderRadius: m3Tokens.shape.medium,
+    borderRadius: 8,
   },
   typography: {
     fontFamily: m3Tokens.typography.fontFamily,
@@ -62,8 +62,8 @@ export const theme = createTheme({
     MuiButton: {
       styleOverrides: {
         root: {
-          borderRadius: m3Tokens.shape.full,
-          padding: '10px 24px',
+          borderRadius: '20px',
+          padding: '8px 20px',
           boxShadow: 'none',
         },
         containedPrimary: {
@@ -78,12 +78,12 @@ export const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          borderRadius: m3Tokens.shape.large,
+          borderRadius: '12px',
           border: `1px solid ${m3Tokens.color.outlineVariant}`,
           boxShadow: 'none',
-          backgroundColor: m3Tokens.color.surface,
+          backgroundColor: '#FFFFFF',
           '&:hover': {
-            boxShadow: '0px 2px 6px rgba(0,0,0,0.08)',
+            boxShadow: '0px 2px 8px rgba(0,0,0,0.06)',
           },
         },
       },
@@ -91,7 +91,7 @@ export const theme = createTheme({
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: m3Tokens.shape.small,
+          borderRadius: '8px',
           fontWeight: 500,
         },
       },
@@ -99,7 +99,7 @@ export const theme = createTheme({
     MuiAppBar: {
       styleOverrides: {
         root: {
-          backgroundColor: m3Tokens.color.surface,
+          backgroundColor: '#FFFFFF',
           color: m3Tokens.color.onSurface,
           boxShadow: 'none',
           borderBottom: `1px solid ${m3Tokens.color.outlineVariant}`,
@@ -108,8 +108,11 @@ export const theme = createTheme({
     },
     MuiPaper: {
       styleOverrides: {
+        root: {
+          backgroundColor: '#FFFFFF',
+        },
         rounded: {
-          borderRadius: m3Tokens.shape.large,
+          borderRadius: '12px',
         },
       },
     },
