@@ -112,15 +112,11 @@ export default function HomePage() {
         <Grid container spacing={3}>
           {sampleClassrooms.map((classroom) => (
             <Grid item xs={12} md={6} key={classroom.id}>
-              <Box
-                onClick={() => setSelectedClassroomId(classroom.id)}
-                sx={{
-                  outline: selectedClassroomId === classroom.id ? `2px solid ${m3Tokens.color.primary}` : 'none',
-                  borderRadius: m3Tokens.shape.large,
-                }}
-              >
-                <ClassroomCard {...classroom} onSelect={(id) => setSelectedClassroomId(id)} />
-              </Box>
+              <ClassroomCard
+                {...classroom}
+                selected={selectedClassroomId === classroom.id}
+                onSelect={(id) => setSelectedClassroomId(id)}
+              />
             </Grid>
           ))}
         </Grid>

@@ -23,7 +23,7 @@ This project is built strictly according to the following 3 core specification f
 | --- | --- | --- | --- | --- |
 | **Part 1** | Project Scaffold + Core UI Shell | **COMPLETED** | `43c5887` | Monorepo layout (`backend/`, `web/`, `mobile/`), Express `/health` API, M3 Design System Tokens, Web & Flutter UI shells with disabled future tabs (`PulseMeter*`, `Quizzes*`, `Forum*`). |
 | **Part 2** | Auth & Roles | **COMPLETED** | `1f3cb99` | Neon PostgreSQL tables (`users`, `courses`, `classrooms`, `enrollments`, `sessions`, `attendance_records`), bcrypt password hashing, signed JWT auth API (`/auth/signup`, `/auth/login`, `/auth/me`), Web & Mobile Light-Mode login/signup screens, role middleware. |
-| **Part 3** | Classroom Management & Join Flow | **NEXT UP** | — | Teacher classroom CRUD, course list, join code/link/QR generator; Student join flow (code, link, QR scan). |
+| **Part 3** | Classroom Management & Join Flow | **IN PLANNING / READY TO BUILD** | — | Teacher classroom CRUD, course list, join code/link/QR generator; Student join flow (code, link, QR scan). |
 | **Part 4** | Attendance Session Engine | PENDING | — | Session start/stop, 3-QR token generator (HMAC), Redis token validation, ACL logging. |
 | **Part 5** | QR Display (Web) + Scanner (Flutter) | PENDING | — | Socket.io 3-QR rotation stream, Flutter ML Kit multi-frame camera decoder, live attendance marking. |
 | **Part 6** | Homepages & Dashboards | PENDING | — | Attendance summary dashboards & student/teacher drill-down views using future-proof card grids. |

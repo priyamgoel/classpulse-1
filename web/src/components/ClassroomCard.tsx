@@ -14,6 +14,7 @@ export interface ClassroomCardProps {
   teacherName: string;
   studentCount?: number;
   joinCode?: string;
+  selected?: boolean;
   onSelect?: (id: string) => void;
 }
 
@@ -25,6 +26,7 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
   teacherName,
   studentCount = 0,
   joinCode,
+  selected = false,
   onSelect,
 }) => {
   return (
@@ -32,7 +34,12 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
       onClick={() => onSelect && onSelect(id)}
       sx={{
         cursor: onSelect ? 'pointer' : 'default',
-        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+        borderRadius: `${m3Tokens.shape.large}px`,
+        border: selected
+          ? `2px solid ${m3Tokens.color.primary}`
+          : `1px solid ${m3Tokens.color.outlineVariant}`,
+        overflow: 'hidden',
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease',
         '&:hover': onSelect
           ? {
               transform: 'translateY(-2px)',
