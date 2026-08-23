@@ -25,7 +25,7 @@ This project is built strictly according to the following 3 core specification f
 | **Part 2** | Auth & Roles | **COMPLETED** | `1f3cb99`, `9d0a015` | Neon PostgreSQL tables (`users`, `courses`, `classrooms`, `enrollments`, `sessions`, `attendance_records`), bcrypt password hashing, signed JWT auth API (`/auth/signup`, `/auth/login`, `/auth/me`), Instructor-only Web dashboard restriction (`9d0a015`), Mobile Flutter Light-Mode login/signup screens. |
 | **Part 3** | Classroom Management & Join Flow | **COMPLETED** | `4b60326` | `GET /courses`, `POST /classrooms`, `POST /classrooms/:id/regenerate-join`, `POST /classrooms/join`, `GET /classrooms/mine`, `GET /classrooms/:id/roster` REST endpoints; Web: `CreateClassroomDialog`, `ClassroomJoinDetailsModal` (join code + copyable link + code regeneration), `ClassroomRosterDialog`; Mobile: `ClassroomService`, `JoinClassroomDialog` widget; Live classroom grid on Instructor Dashboard. |
 | **Part 4** | Attendance Session Engine | **COMPLETED** | `1293fe9` | Upstash Redis connection & cache management, HMAC-SHA256 3-QR token generator with short-lived batches (15s TTL), `POST /sessions` (start), `POST /sessions/:id/end` (end), `GET /sessions/:id/active-tokens`, `POST /attendance/scan` (enforces order `[0,1,2]`, HMAC signature, $\le 10\text{s}$ freshness, enrollment, duplicate check, and logs ACL latency), `GET /attendance/session/:id`, `GET /attendance/me`, and Socket.io server integration. |
-| **Part 5** | QR Display (Web) + Scanner (Flutter) | PENDING | — | Live Web 3-QR rotating projector via Socket.io stream, Flutter camera multi-frame ML Kit decoder, end-to-end device scan testing. |
+| **Part 5** | QR Display (Web) + Scanner (Flutter) | **COMPLETED** | `4390a80` | Live Web 3-QR rotating projector (`LiveSessionModal.tsx`) with Socket.io real-time roster feed and ACL chips; Flutter multi-frame camera scanner (`QrScannerScreen.dart`) with 3-frame sequence buffer and instant Attendance Capture Latency display. |
 | **Part 6** | Homepages & Dashboards | PENDING | — | Attendance summary dashboards & student/teacher drill-down views using future-proof card grids. |
 | **Part 7** | CI/CD & Distribution | PENDING | — | GitHub Actions, Render & Vercel deployment, Firebase App Distribution signed APK pipeline. |
 
@@ -76,6 +76,20 @@ This project is built strictly according to the following 3 core specification f
 - **Socket.io Layer**: Configured WebSocket server on Express with session room management (`join_session`, `leave_session`).
 - **Verification**: Executed automated verification suite testing: session start, token generation, valid scan with ACL calculation (353ms), duplicate scan rejection (409 Conflict), out-of-order sequence rejection (400 Bad Request), expired token rejection (400 Bad Request), tampered signature rejection (400 Bad Request), live roster retrieval, and session termination.
 
+### Action 6: QR Display (Web) & Scanner (Flutter) (Part 5) — Commit `4390a80`
+- **Web Projector Component (`web/src/components/LiveSessionModal.tsx`)**:
+  - Fullscreen/modal projector displaying high-definition SVG rotating QR stream (`qrcode.react`) switching every 800ms across indices `[0, 1, 2]`.
+  - Connected to Socket.io `session_${sessionId}` room; automatically appends newly validated students to the live roster feed in real-time without refreshing.
+  - Displays student name, email, and live Attendance Capture Latency chip (`⚡ ACL: 413ms`).
+  - Added "Start Attendance Session" trigger button on Instructor Dashboard.
+- **Mobile Multi-Frame Scanner (`mobile/lib/screens/qr_scanner_screen.dart`)**:
+  - Built camera scanner using `mobile_scanner` with viewfinder target HUD.
+  - Implemented multi-frame buffer accumulating tokens `[0, 1, 2]` for the active batch.
+  - Recorded `scan_started_at` timestamp on first detected frame and submitted sequence to `POST /attendance/scan`.
+  - Displayed M3 success dialog with `PRESENT` status and Attendance Capture Latency metric (`ACL: XXXms`).
+  - Added "Scan Attendance QR" fast-action card on student home screen.
+- **Verification**: End-to-end Socket.io event delivery verified; Web build passed (`npm run build` compiled 6 static pages); Flutter analyze & tests passed with 0 issues.
+
 ---
 
 ## Instructions for Next AI Session / Handover
@@ -83,9 +97,10 @@ This project is built strictly according to the following 3 core specification f
 When resuming this project in a new AI assistant session or account:
 
 1. Read `progress.md`, [`prompt.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/prompt.md), [`technical_specification.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/technical_specification.md), and [`appearance_mode.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/appearance_mode.md).
-2. **Parts 1, 2, 3, and 4 are fully complete, verified, and committed.**
-3. Before **Part 5 — QR Display (Web) + Scanner (Flutter)**:
-   - Note the **Account & Credential Checkpoint** for Render & Vercel deployment before device testing, or proceed with local/emulator verification per user instructions.
-   - Build Web live rotating 3-QR stream projector using Socket.io (`qr:rotate`).
-   - Build Flutter multi-frame camera scanner using ML Kit.
+2. **Parts 1, 2, 3, 4, and 5 are fully complete, verified, and committed.**
+3. Begin directly with **Part 6 — Homepages & Dashboards**:
+   - Create implementation plan for Part 6.
+   - Build student combined attendance summary with per-subject drill-down views.
+   - Build teacher class-level attendance trends + per-student drill-down.
    - Keep **Light Mode Only** strictly enforced across all UI components.
+   - Update `progress.md` after completing Part 6.
