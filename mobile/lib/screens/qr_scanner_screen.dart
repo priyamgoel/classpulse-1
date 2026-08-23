@@ -259,12 +259,20 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     setState(() {
       _currentZoomFactor = factor;
     });
-    // Map 1x -> 0.0, 2x -> 0.3, 3x -> 0.6, 5x -> 1.0 (max) scale on MobileScanner
-    final scale = factor == 1.0
-        ? 0.0
-        : (factor == 2.0
-            ? 0.3
-            : (factor == 3.0 ? 0.6 : 1.0));
+    // Map 1x -> 0.0, 2x -> 0.1, 5x -> 0.3, 10x -> 0.55, 15x -> 0.8, 20x -> 1.0 (max)
+    double scale = 0.0;
+    if (factor == 2.0) {
+      scale = 0.1;
+    } else if (factor == 5.0) {
+      scale = 0.3;
+    } else if (factor == 10.0) {
+      scale = 0.55;
+    } else if (factor == 15.0) {
+      scale = 0.8;
+    } else if (factor == 20.0) {
+      scale = 1.0;
+    }
+
     try {
       _cameraController.setZoomScale(scale);
     } catch (_) {}
@@ -314,42 +322,46 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             ),
           ),
 
-          // 3. Quick Zoom Selector Floating Buttons (1x, 2x, 3x, 5x) for Back-Bench Scanning
+          // 3. Quick Zoom Selector Floating Bar (1x, 2x, 5x, 10x, 15x, 20x)
           Positioned(
-            top: 20,
-            left: 0,
-            right: 0,
+            top: 16,
+            left: 12,
+            right: 12,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.7),
+                  color: Colors.black.withValues(alpha: 0.75),
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: Colors.white24),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [1.0, 2.0, 3.0, 5.0].map((zoom) {
-                    final isSelected = _currentZoomFactor == zoom;
-                    return GestureDetector(
-                      onTap: () => _setZoomLevel(zoom),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: isSelected ? M3Tokens.primary : Colors.transparent,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '${zoom.toInt()}x',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            fontSize: 13,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [1.0, 2.0, 5.0, 10.0, 15.0, 20.0].map((zoom) {
+                      final isSelected = _currentZoomFactor == zoom;
+                      return GestureDetector(
+                        onTap: () => _setZoomLevel(zoom),
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: isSelected ? M3Tokens.primary : Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            '${zoom.toInt()}x',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                      );
+                    }).toList(),
+                  ),
                 ),
               ),
             ),

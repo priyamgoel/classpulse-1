@@ -239,7 +239,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     : '';
 
   // -------------------------------------------------------------
-  // Fullscreen Theater / Projector View (Max Top-to-Bottom QR + Side Panels)
+  // Fullscreen Theater / Projector View (Maximized Top-to-Bottom QR + Side Panels)
   // -------------------------------------------------------------
   if (isFullscreen) {
     return (
@@ -256,8 +256,8 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
           flexDirection: 'row',
           alignItems: 'stretch',
           justifyContent: 'space-between',
-          p: 2.5,
-          gap: 2.5,
+          p: 1.5,
+          gap: 2,
           boxSizing: 'border-box',
           overflow: 'hidden',
         }}
@@ -266,40 +266,42 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         <Paper
           elevation={0}
           sx={{
-            width: '24%',
-            minWidth: 260,
-            maxWidth: 320,
-            p: 3,
-            borderRadius: '20px',
+            width: '23%',
+            minWidth: 250,
+            maxWidth: 310,
+            p: 2.5,
+            borderRadius: '16px',
             border: `1px solid ${m3Tokens.color.outlineVariant}`,
             bgcolor: m3Tokens.color.background,
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
+            height: 'calc(100vh - 24px)',
+            boxSizing: 'border-box',
           }}
         >
           <Box>
             <Chip
               label="PROJECTOR STREAM"
               color="error"
-              sx={{ fontWeight: 900, fontSize: '0.75rem', mb: 2 }}
+              sx={{ fontWeight: 900, fontSize: '0.75rem', mb: 1.5 }}
             />
-            <Typography variant="h5" sx={{ fontWeight: 900, color: m3Tokens.color.onSurface, lineHeight: 1.2, mb: 1 }}>
+            <Typography variant="h5" sx={{ fontWeight: 900, color: m3Tokens.color.onSurface, lineHeight: 1.2, mb: 0.75 }}>
               {session.course_code}
             </Typography>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, mb: 0.5 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, mb: 0.5, fontSize: '1rem' }}>
               {session.course_name}
             </Typography>
-            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2 }}>
+            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 1.5 }}>
               Section: <strong>{session.section_name}</strong>
             </Typography>
-            <Divider sx={{ my: 2 }} />
+            <Divider sx={{ my: 1.5 }} />
 
-            <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', mb: 1.5 }}>
+            <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', mb: 1 }}>
               Active Rotating Frames
             </Typography>
 
-            <Stack spacing={1.5}>
+            <Stack spacing={1}>
               {[0, 1, 2].map((idx) => {
                 const isActive = currentFrameIdx === idx;
                 return (
@@ -307,31 +309,31 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                     key={idx}
                     elevation={0}
                     sx={{
-                      p: 1.5,
-                      borderRadius: '12px',
+                      p: 1.25,
+                      borderRadius: '10px',
                       border: `2px solid ${isActive ? m3Tokens.color.primary : m3Tokens.color.outlineVariant}`,
                       bgcolor: isActive ? m3Tokens.color.primaryContainer : '#FFFFFF',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      transform: isActive ? 'scale(1.03)' : 'scale(1)',
+                      transform: isActive ? 'scale(1.02)' : 'scale(1)',
                       transition: 'all 0.15s ease-in-out',
                     }}
                   >
-                    <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Stack direction="row" spacing={1.25} alignItems="center">
                       <Box
                         sx={{
-                          width: 12,
-                          height: 12,
+                          width: 10,
+                          height: 10,
                           borderRadius: '50%',
                           bgcolor: isActive ? m3Tokens.color.primary : 'grey.400',
                         }}
                       />
-                      <Typography variant="body2" sx={{ fontWeight: isActive ? 800 : 600, color: isActive ? m3Tokens.color.onPrimaryContainer : m3Tokens.color.onSurface }}>
+                      <Typography variant="body2" sx={{ fontWeight: isActive ? 800 : 600, color: isActive ? m3Tokens.color.onPrimaryContainer : m3Tokens.color.onSurface, fontSize: '0.85rem' }}>
                         Frame {idx + 1} of 3
                       </Typography>
                     </Stack>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: isActive ? m3Tokens.color.primary : m3Tokens.color.onSurfaceVariant }}>
+                    <Typography variant="caption" sx={{ fontWeight: 800, fontSize: '0.7rem', color: isActive ? m3Tokens.color.primary : m3Tokens.color.onSurfaceVariant }}>
                       {isActive ? 'TRANSMITTING' : 'QUEUED'}
                     </Typography>
                   </Paper>
@@ -344,48 +346,50 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
             <Paper
               elevation={0}
               sx={{
-                p: 2,
-                borderRadius: '12px',
+                p: 1.5,
+                borderRadius: '10px',
                 bgcolor: '#FFFFFF',
                 border: `1px solid ${m3Tokens.color.outlineVariant}`,
               }}
             >
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                <SecurityIcon sx={{ fontSize: 18, color: m3Tokens.color.primary }} />
-                <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary }}>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.25 }}>
+                <SecurityIcon sx={{ fontSize: 16, color: m3Tokens.color.primary }} />
+                <Typography variant="caption" sx={{ fontWeight: 800, color: m3Tokens.color.primary, fontSize: '0.75rem' }}>
                   ANTI-PROXY VERIFICATION
                 </Typography>
               </Stack>
-              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', fontSize: '0.75rem', lineHeight: 1.3 }}>
-                Stream rotates every 800ms. Mobile app automatically buffers all 3 sequential frames.
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', fontSize: '0.7rem', lineHeight: 1.3 }}>
+                Stream rotates every 800ms. Mobile app buffers all 3 frames. Use 1x-20x zoom from back seats.
               </Typography>
             </Paper>
           </Box>
         </Paper>
 
-        {/* Center: Massive Top-to-Bottom QR Code (Dominates the Screen Height) */}
+        {/* Center: Absolute Maximum Top-to-Bottom QR Code */}
         <Box
           sx={{
             flex: 1,
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            height: '100%',
+            height: 'calc(100vh - 24px)',
+            minWidth: 0,
           }}
         >
           <Box
             sx={{
-              p: 2.5,
+              p: 1.5,
               bgcolor: '#FFFFFF',
-              borderRadius: '28px',
-              border: `5px solid ${m3Tokens.color.primary}`,
-              boxShadow: '0px 12px 50px rgba(0, 0, 0, 0.15)',
+              borderRadius: '24px',
+              border: `4px solid ${m3Tokens.color.primary}`,
+              boxShadow: '0px 8px 36px rgba(0, 0, 0, 0.12)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              maxHeight: 'calc(94vh - 20px)',
-              maxWidth: 'calc(94vh - 20px)',
+              height: 'calc(100vh - 32px)',
+              width: 'calc(100vh - 32px)',
+              maxWidth: 'calc(100vw - 640px)',
+              maxHeight: 'calc(100vh - 32px)',
               aspectRatio: '1/1',
               boxSizing: 'border-box',
             }}
@@ -393,10 +397,10 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
             {qrStringPayload ? (
               <QRCodeSVG
                 value={qrStringPayload}
-                size={700}
-                style={{ width: '100%', height: '100%' }}
+                size={850}
+                style={{ width: '100%', height: '100%', display: 'block' }}
                 level="L" // Low error correction = Biggest, chunkiest dots for long distance
-                includeMargin={true}
+                includeMargin={false} // Outer box padding serves as crisp quiet zone
                 fgColor="#000000"
                 bgColor="#FFFFFF"
               />
@@ -410,37 +414,41 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         <Paper
           elevation={0}
           sx={{
-            width: '26%',
-            minWidth: 280,
-            maxWidth: 360,
+            width: '25%',
+            minWidth: 260,
+            maxWidth: 330,
             p: 2.5,
-            borderRadius: '20px',
+            borderRadius: '16px',
             border: `1px solid ${m3Tokens.color.outlineVariant}`,
             bgcolor: '#FFFFFF',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
+            height: 'calc(100vh - 24px)',
+            boxSizing: 'border-box',
           }}
         >
           {/* Top Controls */}
           <Box>
-            <Stack direction="row" spacing={1} sx={{ mb: 2.5 }}>
+            <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
               <Button
                 fullWidth
+                size="small"
                 variant="outlined"
                 startIcon={<FullscreenExitIcon />}
                 onClick={toggleFullscreen}
-                sx={{ borderRadius: '10px' }}
+                sx={{ borderRadius: '8px', fontSize: '0.8rem' }}
               >
                 Exit Fullscreen
               </Button>
               <Button
                 fullWidth
+                size="small"
                 variant="contained"
                 color="error"
                 onClick={handleEndSession}
                 disabled={ending}
-                sx={{ borderRadius: '10px', fontWeight: 700 }}
+                sx={{ borderRadius: '8px', fontWeight: 700, fontSize: '0.8rem' }}
               >
                 {ending ? 'Ending...' : 'End Session'}
               </Button>
@@ -449,9 +457,9 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
             <Paper
               elevation={0}
               sx={{
-                p: 2,
-                mb: 2,
-                borderRadius: '12px',
+                p: 1.5,
+                mb: 1.5,
+                borderRadius: '10px',
                 bgcolor: 'success.light',
                 color: 'success.dark',
                 textAlign: 'center',
@@ -460,7 +468,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               <Typography variant="h3" sx={{ fontWeight: 900, color: 'success.dark', lineHeight: 1 }}>
                 {attendees.length}
               </Typography>
-              <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 0.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 0.25, fontSize: '0.85rem' }}>
                 Students Marked Present
               </Typography>
             </Paper>
@@ -471,15 +479,15 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
           </Box>
 
           {/* Real-time Student List */}
-          <Box sx={{ flex: 1, overflowY: 'auto', my: 1.5, pr: 0.5 }}>
+          <Box sx={{ flex: 1, overflowY: 'auto', my: 1, pr: 0.5 }}>
             {attendees.length === 0 ? (
-              <Box sx={{ py: 6, textAlign: 'center' }}>
-                <QrCodeScannerIcon sx={{ fontSize: 40, color: 'grey.400', mb: 1 }} />
-                <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurfaceVariant }}>
+              <Box sx={{ py: 4, textAlign: 'center' }}>
+                <QrCodeScannerIcon sx={{ fontSize: 36, color: 'grey.400', mb: 0.5 }} />
+                <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurfaceVariant, fontSize: '0.85rem' }}>
                   Awaiting Scans...
                 </Typography>
-                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-                  Students scanning with 1x-5x zoom will appear here instantly.
+                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, fontSize: '0.75rem' }}>
+                  Students scanning with 1x-20x zoom will appear here instantly.
                 </Typography>
               </Box>
             ) : (
@@ -489,31 +497,31 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                     <ListItem
                       alignItems="flex-start"
                       sx={{
-                        px: 1,
-                        py: 0.75,
-                        borderRadius: '8px',
+                        px: 0.75,
+                        py: 0.5,
+                        borderRadius: '6px',
                         '&:hover': { bgcolor: m3Tokens.color.surfaceVariant },
                       }}
                     >
-                      <ListItemAvatar sx={{ minWidth: 36 }}>
-                        <Avatar sx={{ width: 28, height: 28, bgcolor: m3Tokens.color.primary, fontSize: '0.75rem' }}>
-                          <PersonIcon fontSize="small" />
+                      <ListItemAvatar sx={{ minWidth: 32 }}>
+                        <Avatar sx={{ width: 24, height: 24, bgcolor: m3Tokens.color.primary, fontSize: '0.7rem' }}>
+                          <PersonIcon sx={{ fontSize: 14 }} />
                         </Avatar>
                       </ListItemAvatar>
                       <ListItemText
                         primary={
-                          <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, fontSize: '0.8rem' }}>
                             {attendee.student.full_name}
                           </Typography>
                         }
                         secondary={
-                          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.25 }}>
-                            <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.25 }}>
+                            <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, fontSize: '0.7rem' }}>
                               {attendee.student.email}
                             </Typography>
                             {attendee.acl_ms !== undefined && (
                               <Chip
-                                icon={<FlashOnIcon sx={{ fontSize: '0.7rem !important' }} />}
+                                icon={<FlashOnIcon sx={{ fontSize: '0.65rem !important' }} />}
                                 label={`${attendee.acl_ms}ms`}
                                 size="small"
                                 color="secondary"
@@ -531,8 +539,8 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
             )}
           </Box>
 
-          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, textAlign: 'center', display: 'block' }}>
-            Socket.io Real-Time Connection Active
+          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, textAlign: 'center', display: 'block', fontSize: '0.7rem' }}>
+            Socket.io Live Feed Active
           </Typography>
         </Paper>
       </Box>
