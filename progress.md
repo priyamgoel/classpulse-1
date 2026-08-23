@@ -23,7 +23,7 @@ This project is built strictly according to the following 3 core specification f
 | --- | --- | --- | --- | --- |
 | **Part 1** | Project Scaffold + Core UI Shell | **COMPLETED** | `43c5887` | Monorepo layout (`backend/`, `web/`, `mobile/`), Express `/health` API, M3 Design System Tokens, Web & Flutter UI shells with disabled future tabs (`PulseMeter*`, `Quizzes*`, `Forum*`). |
 | **Part 2** | Auth & Roles | **COMPLETED** | `1f3cb99`, `9d0a015` | Neon PostgreSQL tables (`users`, `courses`, `classrooms`, `enrollments`, `sessions`, `attendance_records`), bcrypt password hashing, signed JWT auth API (`/auth/signup`, `/auth/login`, `/auth/me`), Instructor-only Web dashboard restriction (`9d0a015`), Mobile Flutter Light-Mode login/signup screens. |
-| **Part 3** | Classroom Management & Join Flow | **IN PLANNING / READY TO BUILD** | — | Teacher classroom CRUD, course list, join code/link/QR generator; Student join flow (code, link, QR scan). |
+| **Part 3** | Classroom Management & Join Flow | **COMPLETED** | `4b60326` | `GET /courses`, `POST /classrooms`, `POST /classrooms/:id/regenerate-join`, `POST /classrooms/join`, `GET /classrooms/mine`, `GET /classrooms/:id/roster` REST endpoints; Web: `CreateClassroomDialog`, `ClassroomJoinDetailsModal` (join code + copyable link + code regeneration), `ClassroomRosterDialog`; Mobile: `ClassroomService`, `JoinClassroomDialog` widget; Live classroom grid on Instructor Dashboard. |
 | **Part 4** | Attendance Session Engine | PENDING | — | Session start/stop, 3-QR token generator (HMAC), Redis token validation, ACL logging. |
 | **Part 5** | QR Display (Web) + Scanner (Flutter) | PENDING | — | Socket.io 3-QR rotation stream, Flutter ML Kit multi-frame camera decoder, live attendance marking. |
 | **Part 6** | Homepages & Dashboards | PENDING | — | Attendance summary dashboards & student/teacher drill-down views using future-proof card grids. |
@@ -54,6 +54,33 @@ This project is built strictly according to the following 3 core specification f
 - **UI Polish**: Fixed `ClassroomCard` hover outline distortion by moving selection border directly into `Card` styling with `overflow: hidden` and smooth 0.15s border color transition (`88dce29`).
 - **Verification**: Tested signup/login for both Teacher and Student roles, verified `/auth/me` protected endpoint and 401 Unauthorized rejection. Web build and Flutter analysis passed cleanly.
 
+### Action 4: Classroom Management & Join Flow (Part 3) — Commit `4b60326`
+- **Backend — New Route Files**:
+  - `backend/src/routes/courses.js`: `GET /courses` returns the pre-seeded course catalog (protected by JWT).
+  - `backend/src/routes/classrooms.js`:
+    - `POST /classrooms` — Teacher creates a new section with an auto-generated 6-character alphanumeric join code (unique collision-checked in DB).
+    - `POST /classrooms/:id/regenerate-join` — Teacher rotates the join code for a section they own.
+    - `POST /classrooms/join` — Student joins a section by submitting the 6-char code; duplicate enrollment rejected with 409.
+    - `GET /classrooms/mine` — Returns taught classrooms (teacher) or enrolled classrooms (student), each with `student_count`.
+    - `GET /classrooms/:id/roster` — Teacher views the full enrolled student roster with join timestamps.
+  - Mounted both routes in `backend/src/index.js`.
+- **Backend — Live Tested**:
+  - `GET /courses` → returned 4 seeded courses ✓
+  - `POST /classrooms` → created section "Section 3CSE1", join code `945SMH` ✓
+  - `POST /classrooms/join` → student enrolled successfully ✓
+  - `GET /classrooms/mine` → returned classroom with `student_count: 1` ✓
+  - `GET /classrooms/:id/roster` → returned enrolled student with name, email, join timestamp ✓
+- **Web Frontend — New Components**:
+  - `web/src/components/CreateClassroomDialog.tsx` — M3 Dialog: course dropdown + section name text field; POSTs to backend on submit.
+  - `web/src/components/ClassroomJoinDetailsModal.tsx` — M3 Modal showing: large monospaced join code in `primaryContainer` chip, copyable shareable link with clipboard icon, "Regenerate Code" button that calls backend.
+  - `web/src/components/ClassroomRosterDialog.tsx` — M3 Dialog: sorted student list with Avatar, name, email, join date; shows empty state when 0 enrolled.
+  - `web/src/app/page.tsx` — Instructor Dashboard updated: live classroom grid fetched from `/classrooms/mine`; QR icon + People icon action buttons per card; active section detail pane with tabs (3 future tabs show "Coming soon" badge); "Create Classroom" button in top bar.
+- **Mobile Flutter — New Files**:
+  - `mobile/lib/services/classroom_service.dart` — `ClassroomService` + `Classroom` model: `fetchMyClassrooms()` and `joinClassroom(code)`.
+  - `mobile/lib/widgets/join_classroom_dialog.dart` — `JoinClassroomDialog`: large center-aligned monospace text field for 6-char code, submits to backend join endpoint.
+  - `mobile/lib/main.dart` — Updated `ClassPulseHomePage` to fetch & display enrolled classrooms, show "Join Section" button for students, refresh on pull-down, and wire up `JoinClassroomDialog`.
+- **Verification**: `npm run build` in `web/` → ✓ Compiled successfully, 6 static pages generated. `flutter analyze && flutter test` in `mobile/` → No issues found, all tests passed.
+
 ---
 
 ## Instructions for Next AI Session / Handover
@@ -61,10 +88,11 @@ This project is built strictly according to the following 3 core specification f
 When resuming this project in a new AI assistant session or account:
 
 1. Read `progress.md`, [`prompt.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/prompt.md), [`technical_specification.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/technical_specification.md), and [`appearance_mode.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/appearance_mode.md).
-2. Note that **Part 1** and **Part 2** are fully complete, verified, and committed.
-3. Begin directly with **Part 3 — Classroom Management & Join Flow**:
-   - Create implementation plan for Part 3.
-   - Restate goals and assumptions in 2-3 sentences.
+2. **Parts 1, 2, and 3 are fully complete, verified, and committed.**
+3. Begin directly with **Part 4 — Attendance Session Engine**:
+   - Read `technical_specification.md` Section on Sessions and anti-proxy QR token generation.
+   - Create implementation plan for Part 4.
    - Wait for user approval before writing code.
+   - Key technologies: Redis (Upstash), HMAC-SHA256 token hashing, `POST /sessions/start`, `POST /sessions/:id/stop`, `POST /sessions/:id/mark`.
    - Keep Light Mode Only rule active across all UI work.
-   - Update `progress.md` after completing Part 3.
+   - Update `progress.md` after completing Part 4.
