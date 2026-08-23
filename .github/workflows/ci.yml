@@ -25,7 +25,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Syntax & Lint Verification
         run: node -c src/index.js src/db/index.js src/services/qrTokenService.js
@@ -51,15 +51,15 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build Next.js Production App
         run: npm run build
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_API_URL: https://classpulse-api-09dw.onrender.com
 
   mobile-ci:
-    name: Mobile App (Flutter Android) CI
+    name: Mobile App (Flutter Android APK Builder)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,6 +73,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 17
+
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -89,5 +92,12 @@ jobs:
       - name: Run Flutter Unit & Widget Tests
         run: flutter test
 
-      - name: Build Testable Android APK
-        run: flutter build apk --debug
+      - name: Build Standalone Android APK
+        run: flutter build apk --release
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: classpulse-release-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
