@@ -3,6 +3,7 @@ import 'services/auth_service.dart';
 import 'services/classroom_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
+import 'screens/qr_scanner_screen.dart';
 import 'theme/tokens.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/classroom_card.dart';
@@ -125,6 +126,24 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
     );
   }
 
+  void _openScannerScreen() async {
+    final result = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const QrScannerScreen()),
+    );
+
+    if (result == true) {
+      _loadClassrooms();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.green,
+            content: Text('Attendance recorded successfully! Marked PRESENT.'),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
     _detailTabController.dispose();
@@ -175,6 +194,53 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
                 ],
               ),
               const SizedBox(height: 16),
+
+              // Student Fast Action: Scan Attendance QR
+              if (user?.role == 'student') ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: M3Tokens.primaryContainer,
+                    borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Live Class Session Active?',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: M3Tokens.onPrimaryContainer,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Aim camera at the rotating 3-QR stream on the projector.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: M3Tokens.onPrimaryContainer.withValues(alpha: 0.8),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton.icon(
+                        onPressed: _openScannerScreen,
+                        icon: const Icon(Icons.qr_code_scanner, size: 18),
+                        label: const Text('Scan QR'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -185,7 +251,7 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
                         ),
                   ),
                   if (user?.role == 'student')
-                    FilledButton.icon(
+                    FilledButton.tonalIcon(
                       onPressed: _openJoinDialog,
                       icon: const Icon(Icons.add, size: 18),
                       label: const Text('Join Section'),
@@ -262,9 +328,10 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
                     ),
                     const SizedBox(height: 16),
                     EmptyStateWidget(
-                      title: 'No Active Scanner Session',
-                      description: 'ML Kit 3-QR scanner will be activated here in Part 5.',
-                      actionLabel: user?.role == 'teacher' ? 'Start Session (Part 4)' : 'Scan QR Code (Part 5)',
+                      title: 'Live Attendance Scanner',
+                      description: 'Tap below to launch the multi-frame 3-QR camera scanner.',
+                      actionLabel: user?.role == 'student' ? 'Scan Attendance QR' : null,
+                      onAction: user?.role == 'student' ? _openScannerScreen : null,
                     ),
                   ],
                 ),

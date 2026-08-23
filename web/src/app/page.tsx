@@ -14,11 +14,13 @@ import {
   Button,
   CircularProgress,
   IconButton,
+  Alert,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import QrCodeIcon from '@mui/icons-material/QrCode';
 import PeopleIcon from '@mui/icons-material/People';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { AppShell } from '@/components/AppShell';
@@ -27,6 +29,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { CreateClassroomDialog } from '@/components/CreateClassroomDialog';
 import { ClassroomJoinDetailsModal } from '@/components/ClassroomJoinDetailsModal';
 import { ClassroomRosterDialog } from '@/components/ClassroomRosterDialog';
+import { LiveSessionModal, LiveSession } from '@/components/LiveSessionModal';
 import { m3Tokens } from '@/theme/tokens';
 
 export interface Classroom {
@@ -48,11 +51,14 @@ export default function HomePage() {
   const [selectedClassroomId, setSelectedClassroomId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState(0);
   const [loadingClassrooms, setLoadingClassrooms] = useState(true);
+  const [startingSession, setStartingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Dialog & Modal States
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinModalClassroom, setJoinModalClassroom] = useState<Classroom | null>(null);
   const [rosterDialogClassroom, setRosterDialogClassroom] = useState<Classroom | null>(null);
+  const [activeLiveSession, setActiveLiveSession] = useState<LiveSession | null>(null);
 
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -84,6 +90,32 @@ export default function HomePage() {
       console.error('Error fetching classrooms:', err);
     } finally {
       setLoadingClassrooms(false);
+    }
+  };
+
+  const handleStartSession = async (classroom: Classroom) => {
+    setStartingSession(true);
+    setSessionError(null);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ classroom_id: classroom.id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.session) {
+        setActiveLiveSession(data.session);
+      } else {
+        setSessionError(data.error || 'Failed to start session');
+      }
+    } catch {
+      setSessionError('Network error starting attendance session');
+    } finally {
+      setStartingSession(false);
     }
   };
 
@@ -125,6 +157,12 @@ export default function HomePage() {
             Create Classroom
           </Button>
         </Stack>
+
+        {sessionError && (
+          <Alert severity="error" sx={{ mb: 3 }} onClose={() => setSessionError(null)}>
+            {sessionError}
+          </Alert>
+        )}
 
         {loadingClassrooms ? (
           <Box sx={{ py: 4, textAlign: 'center' }}>
@@ -259,14 +297,14 @@ export default function HomePage() {
               <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
                 <CheckCircleIcon color="success" />
                 <Typography variant="body1" sx={{ color: m3Tokens.color.onSurface }}>
-                  Section Join Code: <strong>{selectedClassroom.join_code}</strong> ({selectedClassroom.student_count} Enrolled Students). Ready for Part 4 Session Activation.
+                  Section Join Code: <strong>{selectedClassroom.join_code}</strong> ({selectedClassroom.student_count} Enrolled Students).
                 </Typography>
               </Stack>
               <EmptyState
-                title="No Active Attendance Session"
-                description="Live anti-proxy QR attendance session engine will be activated in Part 4 & Part 5."
-                actionLabel="Start Attendance Session (Part 4)"
-                onAction={() => {}}
+                title="Start Anti-Proxy Attendance Session"
+                description="Launch the rotating 3-QR stream projector on the classroom screen. Students will scan using the Android app."
+                actionLabel={startingSession ? 'Launching Projector...' : 'Start Attendance Session'}
+                onAction={() => handleStartSession(selectedClassroom)}
               />
             </Box>
           )}
@@ -294,6 +332,15 @@ export default function HomePage() {
         open={Boolean(rosterDialogClassroom)}
         onClose={() => setRosterDialogClassroom(null)}
         classroom={rosterDialogClassroom}
+      />
+      <LiveSessionModal
+        open={Boolean(activeLiveSession)}
+        session={activeLiveSession}
+        onClose={() => setActiveLiveSession(null)}
+        onSessionEnded={() => {
+          setActiveLiveSession(null);
+          fetchClassrooms();
+        }}
       />
     </AppShell>
   );
