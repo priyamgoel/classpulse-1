@@ -4,6 +4,7 @@ import 'services/classroom_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/qr_scanner_screen.dart';
+import 'screens/attendance_dashboard_screen.dart';
 import 'theme/tokens.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/classroom_card.dart';
@@ -76,21 +77,62 @@ class _ClassPulseAppState extends State<ClassPulseApp> {
                     });
                   },
                 ))
-          : ClassPulseHomePage(onLogout: _onLogout),
+          : ClassPulseMainHost(onLogout: _onLogout),
     );
   }
 }
 
-class ClassPulseHomePage extends StatefulWidget {
+class ClassPulseMainHost extends StatefulWidget {
   final VoidCallback onLogout;
 
-  const ClassPulseHomePage({super.key, required this.onLogout});
+  const ClassPulseMainHost({super.key, required this.onLogout});
 
   @override
-  State<ClassPulseHomePage> createState() => _ClassPulseHomePageState();
+  State<ClassPulseMainHost> createState() => _ClassPulseMainHostState();
 }
 
-class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTickerProviderStateMixin {
+class _ClassPulseMainHostState extends State<ClassPulseMainHost> {
+  int _currentNavIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget currentBody;
+
+    switch (_currentNavIndex) {
+      case 1:
+        currentBody = const AttendanceDashboardScreen();
+        break;
+      case 5:
+        currentBody = ProfileView(onLogout: widget.onLogout);
+        break;
+      case 0:
+      default:
+        currentBody = ClassroomsHomeView(onLogout: widget.onLogout);
+        break;
+    }
+
+    return AppShell(
+      currentIndex: _currentNavIndex,
+      onTabSelected: (index) {
+        setState(() {
+          _currentNavIndex = index;
+        });
+      },
+      body: currentBody,
+    );
+  }
+}
+
+class ClassroomsHomeView extends StatefulWidget {
+  final VoidCallback onLogout;
+
+  const ClassroomsHomeView({super.key, required this.onLogout});
+
+  @override
+  State<ClassroomsHomeView> createState() => _ClassroomsHomeViewState();
+}
+
+class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTickerProviderStateMixin {
   late TabController _detailTabController;
   List<Classroom> _classrooms = [];
   bool _isLoading = true;
@@ -154,7 +196,33 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
   Widget build(BuildContext context) {
     final user = AuthService.currentUser;
 
-    return AppShell(
+    return Scaffold(
+      appBar: AppBar(
+        title: Row(
+          children: [
+            const Text('ClassPulse', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: M3Tokens.secondaryContainer,
+                borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
+              ),
+              child: const Text(
+                'Iteration 1',
+                style: TextStyle(fontSize: 10, color: M3Tokens.onSecondaryContainer, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: M3Tokens.error),
+            onPressed: widget.onLogout,
+            tooltip: 'Sign Out',
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _loadClassrooms,
         child: SingleChildScrollView(
@@ -163,33 +231,23 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Welcome, ${user?.fullName ?? "User"}!',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: M3Tokens.onSurface,
-                            ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Role: ${user?.role.toUpperCase() ?? "STUDENT"}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: M3Tokens.secondary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                    ],
+                  Text(
+                    'Welcome, ${user?.fullName ?? "User"}!',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: M3Tokens.onSurface,
+                        ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.logout, color: M3Tokens.error),
-                    onPressed: widget.onLogout,
-                    tooltip: 'Sign Out',
+                  const SizedBox(height: 2),
+                  Text(
+                    'Role: ${user?.role.toUpperCase() ?? "STUDENT"}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: M3Tokens.secondary,
+                          fontWeight: FontWeight.bold,
+                        ),
                   ),
                 ],
               ),
@@ -338,6 +396,83 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class ProfileView extends StatelessWidget {
+  final VoidCallback onLogout;
+
+  const ProfileView({super.key, required this.onLogout});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = AuthService.currentUser;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('User Profile', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            Center(
+              child: CircleAvatar(
+                radius: 40,
+                backgroundColor: M3Tokens.primary,
+                child: Text(
+                  user?.fullName.isNotEmpty == true ? user!.fullName[0].toUpperCase() : 'U',
+                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              user?.fullName ?? 'User Name',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: M3Tokens.onSurface),
+            ),
+            Text(
+              user?.email ?? '',
+              style: const TextStyle(fontSize: 14, color: M3Tokens.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: M3Tokens.secondaryContainer,
+                borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
+              ),
+              child: Text(
+                'ROLE: ${user?.role.toUpperCase() ?? "STUDENT"}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: M3Tokens.onSecondaryContainer),
+              ),
+            ),
+            const SizedBox(height: 32),
+            const Divider(),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.info_outline, color: M3Tokens.primary),
+              title: const Text('ClassPulse Version', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Iteration 1 (Pilot Release 0.1.0)'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.shield_outlined, color: M3Tokens.primary),
+              title: const Text('Appearance Mode', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Strict Light Mode Only'),
+            ),
+            const Spacer(),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: onLogout,
+                icon: const Icon(Icons.logout, color: M3Tokens.error),
+                label: const Text('Sign Out', style: TextStyle(color: M3Tokens.error, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
         ),
       ),
     );

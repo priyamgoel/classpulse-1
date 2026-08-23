@@ -15,12 +15,17 @@ import {
   CircularProgress,
   IconButton,
   Alert,
+  Divider,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import QrCodeIcon from '@mui/icons-material/QrCode';
 import PeopleIcon from '@mui/icons-material/People';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PsychologyIcon from '@mui/icons-material/Psychology';
+import QuizIcon from '@mui/icons-material/Quiz';
+import ForumIcon from '@mui/icons-material/Forum';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { AppShell } from '@/components/AppShell';
@@ -30,6 +35,7 @@ import { CreateClassroomDialog } from '@/components/CreateClassroomDialog';
 import { ClassroomJoinDetailsModal } from '@/components/ClassroomJoinDetailsModal';
 import { ClassroomRosterDialog } from '@/components/ClassroomRosterDialog';
 import { LiveSessionModal, LiveSession } from '@/components/LiveSessionModal';
+import { AttendanceAnalyticsView } from '@/components/AttendanceAnalyticsView';
 import { m3Tokens } from '@/theme/tokens';
 
 export interface Classroom {
@@ -130,7 +136,7 @@ export default function HomePage() {
   const selectedClassroom = classrooms.find((c) => c.id === selectedClassroomId) || classrooms[0];
 
   const detailTabs = [
-    { label: 'Overview', disabled: false, tooltip: 'Attendance sessions and section overview' },
+    { label: 'Overview & Analytics', disabled: false, tooltip: 'Attendance sessions, stats, and student drill-downs' },
     { label: 'PulseMeter', disabled: true, tooltip: 'Coming Soon in Iteration 2: Real-time feedback' },
     { label: 'Quizzes', disabled: true, tooltip: 'Coming Soon in Iteration 2: Live quizzes & leaderboards' },
     { label: 'Forum', disabled: true, tooltip: 'Coming Soon in Iteration 2: Classroom doubt forum' },
@@ -229,32 +235,33 @@ export default function HomePage() {
       </Box>
 
       {selectedClassroom && (
-        <Paper sx={{ p: 3, mb: 4 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Paper sx={{ p: 3, mb: 4, borderRadius: m3Tokens.shape.large, border: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 2.5 }}>
             <Box>
-              <Typography variant="caption" sx={{ color: m3Tokens.color.secondary, fontWeight: 700, textTransform: 'uppercase' }}>
-                Active Section Detail
+              <Typography variant="caption" sx={{ color: m3Tokens.color.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Active Section Drill-Down
               </Typography>
-              <Typography variant="h5" sx={{ color: m3Tokens.color.onSurface, mt: 0.5 }}>
+              <Typography variant="h5" sx={{ color: m3Tokens.color.onSurface, mt: 0.25, fontWeight: 700 }}>
                 {selectedClassroom.course_code}: {selectedClassroom.course_name} ({selectedClassroom.section_name})
               </Typography>
             </Box>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1.5}>
               <Button
-                variant="outlined"
-                startIcon={<QrCodeIcon />}
-                size="small"
-                onClick={() => setJoinModalClassroom(selectedClassroom)}
+                variant="contained"
+                color="primary"
+                startIcon={<PlayArrowIcon />}
+                onClick={() => handleStartSession(selectedClassroom)}
+                disabled={startingSession}
               >
-                Join Credentials ({selectedClassroom.join_code})
+                {startingSession ? 'Launching...' : 'Start Session'}
               </Button>
               <Button
                 variant="outlined"
-                startIcon={<PeopleIcon />}
-                size="small"
-                onClick={() => setRosterDialogClassroom(selectedClassroom)}
+                startIcon={<QrCodeIcon />}
+                size="medium"
+                onClick={() => setJoinModalClassroom(selectedClassroom)}
               >
-                Roster ({selectedClassroom.student_count})
+                Join Code ({selectedClassroom.join_code})
               </Button>
             </Stack>
           </Stack>
@@ -293,23 +300,96 @@ export default function HomePage() {
           </Box>
 
           {detailTab === 0 && (
-            <Box>
-              <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-                <CheckCircleIcon color="success" />
-                <Typography variant="body1" sx={{ color: m3Tokens.color.onSurface }}>
-                  Section Join Code: <strong>{selectedClassroom.join_code}</strong> ({selectedClassroom.student_count} Enrolled Students).
-                </Typography>
-              </Stack>
-              <EmptyState
-                title="Start Anti-Proxy Attendance Session"
-                description="Launch the rotating 3-QR stream projector on the classroom screen. Students will scan using the Android app."
-                actionLabel={startingSession ? 'Launching Projector...' : 'Start Attendance Session'}
-                onAction={() => handleStartSession(selectedClassroom)}
-              />
-            </Box>
+            <AttendanceAnalyticsView classroomId={selectedClassroom.id} />
           )}
         </Paper>
       )}
+
+      {/* 5. Future Feature Hooks Card Grid (Section 7 Spec Requirement) */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block', mb: 1.5 }}>
+          Reserved Future Capabilities (Iteration 2 Hooks)
+        </Typography>
+        <Grid container spacing={2.5}>
+          <Grid item xs={12} md={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                borderRadius: m3Tokens.shape.medium,
+                border: `1px dashed ${m3Tokens.color.outlineVariant}`,
+                bgcolor: m3Tokens.color.surfaceVariant,
+                opacity: 0.85,
+              }}
+            >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                  PulseMeter
+                </Typography>
+                <Chip label="Coming soon" size="small" sx={{ height: 18, fontSize: '0.65rem' }} />
+              </Stack>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 1.5 }}>
+                Real-time lecture pace and comprehension feedback stream from enrolled students.
+              </Typography>
+              <Button size="small" variant="text" disabled startIcon={<PsychologyIcon fontSize="small" />}>
+                Launch Stream
+              </Button>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                borderRadius: m3Tokens.shape.medium,
+                border: `1px dashed ${m3Tokens.color.outlineVariant}`,
+                bgcolor: m3Tokens.color.surfaceVariant,
+                opacity: 0.85,
+              }}
+            >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                  Live Quizzes
+                </Typography>
+                <Chip label="Coming soon" size="small" sx={{ height: 18, fontSize: '0.65rem' }} />
+              </Stack>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 1.5 }}>
+                Instant in-class multiple-choice polling with live leaderboard distribution.
+              </Typography>
+              <Button size="small" variant="text" disabled startIcon={<QuizIcon fontSize="small" />}>
+                Create Quiz
+              </Button>
+            </Paper>
+          </Grid>
+
+          <Grid item xs={12} md={4}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                borderRadius: m3Tokens.shape.medium,
+                border: `1px dashed ${m3Tokens.color.outlineVariant}`,
+                bgcolor: m3Tokens.color.surfaceVariant,
+                opacity: 0.85,
+              }}
+            >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                  Doubt Forum
+                </Typography>
+                <Chip label="Coming soon" size="small" sx={{ height: 18, fontSize: '0.65rem' }} />
+              </Stack>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 1.5 }}>
+                Section-specific asynchronous discussion board with instructor upvoting.
+              </Typography>
+              <Button size="small" variant="text" disabled startIcon={<ForumIcon fontSize="small" />}>
+                Open Forum
+              </Button>
+            </Paper>
+          </Grid>
+        </Grid>
+      </Box>
 
       {/* Dialogs & Modals */}
       <CreateClassroomDialog
