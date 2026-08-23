@@ -13,40 +13,46 @@ import {
   Stack,
   Button,
   CircularProgress,
+  IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import QrCodeIcon from '@mui/icons-material/QrCode';
+import PeopleIcon from '@mui/icons-material/People';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { AppShell } from '@/components/AppShell';
 import { ClassroomCard } from '@/components/ClassroomCard';
 import { EmptyState } from '@/components/EmptyState';
+import { CreateClassroomDialog } from '@/components/CreateClassroomDialog';
+import { ClassroomJoinDetailsModal } from '@/components/ClassroomJoinDetailsModal';
+import { ClassroomRosterDialog } from '@/components/ClassroomRosterDialog';
 import { m3Tokens } from '@/theme/tokens';
 
-const sampleClassrooms = [
-  {
-    id: 'c1',
-    courseCode: 'UCS503P',
-    courseName: 'Software Engineering Lab',
-    sectionName: 'Section 3CSE1',
-    teacherName: 'Dr. A. Sharma',
-    studentCount: 38,
-    joinCode: 'SE503A',
-  },
-  {
-    id: 'c2',
-    courseCode: 'UCS405',
-    courseName: 'Discrete Mathematical Structures',
-    sectionName: 'Section 3CSE2',
-    teacherName: 'Prof. R. Kumar',
-    studentCount: 45,
-    joinCode: 'DMS405',
-  },
-];
+export interface Classroom {
+  id: string;
+  course_id: string;
+  course_code: string;
+  course_name: string;
+  section_name: string;
+  teacher_id: string;
+  teacher_name: string;
+  join_code: string;
+  student_count: number;
+}
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export default function HomePage() {
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [selectedClassroomId, setSelectedClassroomId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState(0);
-  const [selectedClassroomId, setSelectedClassroomId] = useState<string>('c1');
+  const [loadingClassrooms, setLoadingClassrooms] = useState(true);
+
+  // Dialog & Modal States
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [joinModalClassroom, setJoinModalClassroom] = useState<Classroom | null>(null);
+  const [rosterDialogClassroom, setRosterDialogClassroom] = useState<Classroom | null>(null);
 
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -54,8 +60,32 @@ export default function HomePage() {
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login');
+    } else if (user) {
+      fetchClassrooms();
     }
   }, [user, loading, router]);
+
+  const fetchClassrooms = async () => {
+    setLoadingClassrooms(true);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const response = await fetch(`${API_BASE_URL}/classrooms/mine`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (response.ok) {
+        const fetched = data.classrooms || [];
+        setClassrooms(fetched);
+        if (fetched.length > 0 && !selectedClassroomId) {
+          setSelectedClassroomId(fetched[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching classrooms:', err);
+    } finally {
+      setLoadingClassrooms(false);
+    }
+  };
 
   if (loading || !user) {
     return (
@@ -65,7 +95,7 @@ export default function HomePage() {
     );
   }
 
-  const selectedClassroom = sampleClassrooms.find((c) => c.id === selectedClassroomId) || sampleClassrooms[0];
+  const selectedClassroom = classrooms.find((c) => c.id === selectedClassroomId) || classrooms[0];
 
   const detailTabs = [
     { label: 'Overview', disabled: false, tooltip: 'Attendance sessions and section overview' },
@@ -90,84 +120,181 @@ export default function HomePage() {
             variant="contained"
             color="primary"
             startIcon={<AddIcon />}
-            disabled
-            sx={{ opacity: 0.7 }}
+            onClick={() => setCreateDialogOpen(true)}
           >
-            Create Classroom (Part 3)
+            Create Classroom
           </Button>
         </Stack>
 
-        <Grid container spacing={3}>
-          {sampleClassrooms.map((classroom) => (
-            <Grid item xs={12} md={6} key={classroom.id}>
-              <ClassroomCard
-                {...classroom}
-                selected={selectedClassroomId === classroom.id}
-                onSelect={(id) => setSelectedClassroomId(id)}
-              />
-            </Grid>
-          ))}
-        </Grid>
+        {loadingClassrooms ? (
+          <Box sx={{ py: 4, textAlign: 'center' }}>
+            <CircularProgress size={32} />
+          </Box>
+        ) : classrooms.length === 0 ? (
+          <EmptyState
+            title="No Classrooms Created Yet"
+            description="Create your first lecture or lab section to generate student join codes."
+            actionLabel="Create Classroom"
+            onAction={() => setCreateDialogOpen(true)}
+          />
+        ) : (
+          <Grid container spacing={3}>
+            {classrooms.map((classroom) => (
+              <Grid item xs={12} md={6} key={classroom.id}>
+                <Box sx={{ position: 'relative' }}>
+                  <ClassroomCard
+                    id={classroom.id}
+                    courseCode={classroom.course_code}
+                    courseName={classroom.course_name}
+                    sectionName={classroom.section_name}
+                    teacherName={classroom.teacher_name || user.full_name}
+                    studentCount={classroom.student_count}
+                    joinCode={classroom.join_code}
+                    selected={selectedClassroomId === classroom.id}
+                    onSelect={(id) => setSelectedClassroomId(id)}
+                  />
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    sx={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
+                  >
+                    <Tooltip title="View Join Credentials & QR">
+                      <IconButton
+                        size="small"
+                        sx={{ bgcolor: m3Tokens.color.surfaceVariant }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setJoinModalClassroom(classroom);
+                        }}
+                      >
+                        <QrCodeIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="View Student Roster">
+                      <IconButton
+                        size="small"
+                        sx={{ bgcolor: m3Tokens.color.surfaceVariant }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRosterDialogClassroom(classroom);
+                        }}
+                      >
+                        <PeopleIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
+                </Box>
+              </Grid>
+            ))}
+          </Grid>
+        )}
       </Box>
 
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Typography variant="caption" sx={{ color: m3Tokens.color.secondary, fontWeight: 700, textTransform: 'uppercase' }}>
-          Active Section Detail
-        </Typography>
-        <Typography variant="h5" sx={{ color: m3Tokens.color.onSurface, mt: 0.5, mb: 2 }}>
-          {selectedClassroom.courseCode}: {selectedClassroom.courseName} ({selectedClassroom.sectionName})
-        </Typography>
-
-        <Box sx={{ borderBottom: 1, borderColor: m3Tokens.color.outlineVariant, mb: 3 }}>
-          <Tabs
-            value={detailTab}
-            onChange={(_, newValue) => {
-              if (!detailTabs[newValue].disabled) {
-                setDetailTab(newValue);
-              }
-            }}
-          >
-            {detailTabs.map((tab) => (
-              <Tab
-                key={tab.label}
-                disabled={tab.disabled}
-                label={
-                  <Tooltip title={tab.tooltip} arrow>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <span>{tab.label}</span>
-                      {tab.disabled && (
-                        <Chip
-                          label="Coming soon"
-                          size="small"
-                          sx={{ height: 16, fontSize: '0.6rem', backgroundColor: m3Tokens.color.surfaceVariant }}
-                        />
-                      )}
-                    </Stack>
-                  </Tooltip>
-                }
-                sx={{ opacity: tab.disabled ? 0.45 : 1, cursor: tab.disabled ? 'not-allowed' : 'pointer' }}
-              />
-            ))}
-          </Tabs>
-        </Box>
-
-        {detailTab === 0 && (
-          <Box>
-            <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-              <CheckCircleIcon color="success" />
-              <Typography variant="body1" sx={{ color: m3Tokens.color.onSurface }}>
-                Authenticated as Instructor <strong>{user.email}</strong>. Classroom management engine ready for Part 3.
+      {selectedClassroom && (
+        <Paper sx={{ p: 3, mb: 4 }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+            <Box>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.secondary, fontWeight: 700, textTransform: 'uppercase' }}>
+                Active Section Detail
               </Typography>
+              <Typography variant="h5" sx={{ color: m3Tokens.color.onSurface, mt: 0.5 }}>
+                {selectedClassroom.course_code}: {selectedClassroom.course_name} ({selectedClassroom.section_name})
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant="outlined"
+                startIcon={<QrCodeIcon />}
+                size="small"
+                onClick={() => setJoinModalClassroom(selectedClassroom)}
+              >
+                Join Credentials ({selectedClassroom.join_code})
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<PeopleIcon />}
+                size="small"
+                onClick={() => setRosterDialogClassroom(selectedClassroom)}
+              >
+                Roster ({selectedClassroom.student_count})
+              </Button>
             </Stack>
-            <EmptyState
-              title="No Active Attendance Session"
-              description="Live anti-proxy QR attendance session engine will be activated in Part 4 & Part 5."
-              actionLabel="Start Attendance Session (Part 4)"
-              onAction={() => {}}
-            />
+          </Stack>
+
+          <Box sx={{ borderBottom: 1, borderColor: m3Tokens.color.outlineVariant, mb: 3 }}>
+            <Tabs
+              value={detailTab}
+              onChange={(_, newValue) => {
+                if (!detailTabs[newValue].disabled) {
+                  setDetailTab(newValue);
+                }
+              }}
+            >
+              {detailTabs.map((tab) => (
+                <Tab
+                  key={tab.label}
+                  disabled={tab.disabled}
+                  label={
+                    <Tooltip title={tab.tooltip} arrow>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <span>{tab.label}</span>
+                        {tab.disabled && (
+                          <Chip
+                            label="Coming soon"
+                            size="small"
+                            sx={{ height: 16, fontSize: '0.6rem', backgroundColor: m3Tokens.color.surfaceVariant }}
+                          />
+                        )}
+                      </Stack>
+                    </Tooltip>
+                  }
+                  sx={{ opacity: tab.disabled ? 0.45 : 1, cursor: tab.disabled ? 'not-allowed' : 'pointer' }}
+                />
+              ))}
+            </Tabs>
           </Box>
-        )}
-      </Paper>
+
+          {detailTab === 0 && (
+            <Box>
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+                <CheckCircleIcon color="success" />
+                <Typography variant="body1" sx={{ color: m3Tokens.color.onSurface }}>
+                  Section Join Code: <strong>{selectedClassroom.join_code}</strong> ({selectedClassroom.student_count} Enrolled Students). Ready for Part 4 Session Activation.
+                </Typography>
+              </Stack>
+              <EmptyState
+                title="No Active Attendance Session"
+                description="Live anti-proxy QR attendance session engine will be activated in Part 4 & Part 5."
+                actionLabel="Start Attendance Session (Part 4)"
+                onAction={() => {}}
+              />
+            </Box>
+          )}
+        </Paper>
+      )}
+
+      {/* Dialogs & Modals */}
+      <CreateClassroomDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onSuccess={fetchClassrooms}
+      />
+      <ClassroomJoinDetailsModal
+        open={Boolean(joinModalClassroom)}
+        onClose={() => setJoinModalClassroom(null)}
+        classroom={joinModalClassroom}
+        onCodeRegenerated={(newCode) => {
+          if (joinModalClassroom) {
+            setJoinModalClassroom({ ...joinModalClassroom, join_code: newCode });
+            fetchClassrooms();
+          }
+        }}
+      />
+      <ClassroomRosterDialog
+        open={Boolean(rosterDialogClassroom)}
+        onClose={() => setRosterDialogClassroom(null)}
+        classroom={rosterDialogClassroom}
+      />
     </AppShell>
   );
 }

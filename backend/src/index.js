@@ -4,6 +4,8 @@ require('dotenv').config();
 
 const db = require('./db');
 const authRoutes = require('./routes/auth');
+const coursesRoutes = require('./routes/courses');
+const classroomsRoutes = require('./routes/classrooms');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -16,6 +18,8 @@ db.initDb();
 
 // Mount API Routes
 app.use('/auth', authRoutes);
+app.use('/courses', coursesRoutes);
+app.use('/classrooms', classroomsRoutes);
 
 // Health Check Endpoint (Part 1 Acceptance Requirement)
 app.get('/health', (req, res) => {

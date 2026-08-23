@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'services/auth_service.dart';
+import 'services/classroom_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'theme/tokens.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/classroom_card.dart';
 import 'widgets/empty_state.dart';
+import 'widgets/join_classroom_dialog.dart';
 
 void main() {
   runApp(const ClassPulseApp());
@@ -41,7 +43,6 @@ class _ClassPulseAppState extends State<ClassPulseApp> {
     return MaterialApp(
       title: 'ClassPulse Mobile',
       debugShowCheckedModeBanner: false,
-      // Strict Light Mode Only per appearance_mode.md
       themeMode: ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
@@ -90,32 +91,38 @@ class ClassPulseHomePage extends StatefulWidget {
 
 class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTickerProviderStateMixin {
   late TabController _detailTabController;
-
-  final List<Map<String, dynamic>> _sampleClassrooms = [
-    {
-      'id': 'c1',
-      'courseCode': 'UCS503P',
-      'courseName': 'Software Engineering Lab',
-      'sectionName': 'Section 3CSE1',
-      'teacherName': 'Dr. A. Sharma',
-      'studentCount': 38,
-      'joinCode': 'SE503A',
-    },
-    {
-      'id': 'c2',
-      'courseCode': 'UCS405',
-      'courseName': 'Discrete Mathematical Structures',
-      'sectionName': 'Section 3CSE2',
-      'teacherName': 'Prof. R. Kumar',
-      'studentCount': 45,
-      'joinCode': 'DMS405',
-    },
-  ];
+  List<Classroom> _classrooms = [];
+  bool _isLoading = true;
+  String? _selectedClassroomId;
 
   @override
   void initState() {
     super.initState();
     _detailTabController = TabController(length: 4, vsync: this);
+    _loadClassrooms();
+  }
+
+  Future<void> _loadClassrooms() async {
+    setState(() {
+      _isLoading = true;
+    });
+    final list = await ClassroomService.fetchMyClassrooms();
+    setState(() {
+      _classrooms = list;
+      if (list.isNotEmpty && _selectedClassroomId == null) {
+        _selectedClassroomId = list.first.id;
+      }
+      _isLoading = false;
+    });
+  }
+
+  void _openJoinDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => JoinClassroomDialog(
+        onSuccess: _loadClassrooms,
+      ),
+    );
   }
 
   @override
@@ -129,101 +136,141 @@ class _ClassPulseHomePageState extends State<ClassPulseHomePage> with SingleTick
     final user = AuthService.currentUser;
 
     return AppShell(
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Welcome, ${user?.fullName ?? "User"}!',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: M3Tokens.onSurface,
-                          ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Role: ${user?.role.toUpperCase() ?? "STUDENT"}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: M3Tokens.secondary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  icon: const Icon(Icons.logout, color: M3Tokens.error),
-                  onPressed: widget.onLogout,
-                  tooltip: 'Sign Out',
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            ..._sampleClassrooms.map((c) => ClassroomCardWidget(
-                  id: c['id'],
-                  courseCode: c['courseCode'],
-                  courseName: c['courseName'],
-                  sectionName: c['sectionName'],
-                  teacherName: c['teacherName'],
-                  studentCount: c['studentCount'],
-                  joinCode: c['joinCode'],
-                  onTap: () {},
-                )),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                color: M3Tokens.surface,
-                borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
-                border: Border.all(color: M3Tokens.outlineVariant),
-              ),
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: RefreshIndicator(
+        onRefresh: _loadClassrooms,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'RESERVED TAB STRIP HOOK (SPEC SECTION 7)',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: M3Tokens.secondary),
-                  ),
-                  const SizedBox(height: 8),
-                  TabBar(
-                    controller: _detailTabController,
-                    isScrollable: true,
-                    labelColor: M3Tokens.primary,
-                    unselectedLabelColor: M3Tokens.onSurfaceVariant,
-                    indicatorColor: M3Tokens.primary,
-                    tabs: const [
-                      Tab(text: 'Overview'),
-                      Tab(text: 'PulseMeter*'),
-                      Tab(text: 'Quizzes*'),
-                      Tab(text: 'Forum*'),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Welcome, ${user?.fullName ?? "User"}!',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: M3Tokens.onSurface,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Role: ${user?.role.toUpperCase() ?? "STUDENT"}',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: M3Tokens.secondary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
                     ],
-                    onTap: (index) {
-                      if (index != 0) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Tab coming soon in Iteration 2'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    },
                   ),
-                  const SizedBox(height: 16),
-                  EmptyStateWidget(
-                    title: 'No Active Scanner Session',
-                    description: 'ML Kit 3-QR scanner will be activated here in Part 5.',
-                    actionLabel: user?.role == 'teacher' ? 'Start Session (Part 4)' : 'Scan QR Code (Part 5)',
+                  IconButton(
+                    icon: const Icon(Icons.logout, color: M3Tokens.error),
+                    onPressed: widget.onLogout,
+                    tooltip: 'Sign Out',
                   ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Enrolled Classrooms',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  if (user?.role == 'student')
+                    FilledButton.icon(
+                      onPressed: _openJoinDialog,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Join Section'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_isLoading)
+                const Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_classrooms.isEmpty)
+                EmptyStateWidget(
+                  title: 'No Classrooms Enrolled',
+                  description: 'Ask your instructor for a 6-character join code to join a classroom section.',
+                  actionLabel: user?.role == 'student' ? 'Join Classroom' : null,
+                  onAction: user?.role == 'student' ? _openJoinDialog : null,
+                )
+              else
+                ..._classrooms.map((c) => ClassroomCardWidget(
+                      id: c.id,
+                      courseCode: c.courseCode,
+                      courseName: c.courseName,
+                      sectionName: c.sectionName,
+                      teacherName: c.teacherName,
+                      studentCount: c.studentCount,
+                      joinCode: c.joinCode,
+                      selected: _selectedClassroomId == c.id,
+                      onTap: () {
+                        setState(() {
+                          _selectedClassroomId = c.id;
+                        });
+                      },
+                    )),
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  color: M3Tokens.surface,
+                  borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
+                  border: Border.all(color: M3Tokens.outlineVariant),
+                ),
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'RESERVED TAB STRIP HOOK (SPEC SECTION 7)',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: M3Tokens.secondary),
+                    ),
+                    const SizedBox(height: 8),
+                    TabBar(
+                      controller: _detailTabController,
+                      isScrollable: true,
+                      labelColor: M3Tokens.primary,
+                      unselectedLabelColor: M3Tokens.onSurfaceVariant,
+                      indicatorColor: M3Tokens.primary,
+                      tabs: const [
+                        Tab(text: 'Overview'),
+                        Tab(text: 'PulseMeter*'),
+                        Tab(text: 'Quizzes*'),
+                        Tab(text: 'Forum*'),
+                      ],
+                      onTap: (index) {
+                        if (index != 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Tab coming soon in Iteration 2'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    EmptyStateWidget(
+                      title: 'No Active Scanner Session',
+                      description: 'ML Kit 3-QR scanner will be activated here in Part 5.',
+                      actionLabel: user?.role == 'teacher' ? 'Start Session (Part 4)' : 'Scan QR Code (Part 5)',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
