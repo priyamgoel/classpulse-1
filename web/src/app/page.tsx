@@ -15,6 +15,10 @@ import {
   CircularProgress,
   IconButton,
   Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import QrCodeIcon from '@mui/icons-material/QrCode';
@@ -23,6 +27,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PsychologyIcon from '@mui/icons-material/Psychology';
 import QuizIcon from '@mui/icons-material/Quiz';
 import ForumIcon from '@mui/icons-material/Forum';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { AppShell } from '@/components/AppShell';
@@ -56,11 +61,13 @@ export default function HomePage() {
   const [loadingClassrooms, setLoadingClassrooms] = useState(true);
   const [startingSession, setStartingSession] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Dialog & Modal States
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinModalClassroom, setJoinModalClassroom] = useState<Classroom | null>(null);
   const [rosterDialogClassroom, setRosterDialogClassroom] = useState<Classroom | null>(null);
+  const [deleteConfirmClassroom, setDeleteConfirmClassroom] = useState<Classroom | null>(null);
   // activeLiveSession holds the running session object (never null while session is live)
   // liveSessionModalOpen controls whether the projector dialog is visible
   const [activeLiveSession, setActiveLiveSession] = useState<LiveSession | null>(null);
@@ -123,6 +130,29 @@ export default function HomePage() {
       setSessionError('Network error starting attendance session');
     } finally {
       setStartingSession(false);
+    }
+  };
+
+  const handleDeleteClassroom = async (classroom: Classroom) => {
+    setDeletingId(classroom.id);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/classrooms/${classroom.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setDeleteConfirmClassroom(null);
+        if (selectedClassroomId === classroom.id) setSelectedClassroomId(null);
+        fetchClassrooms();
+      } else {
+        const data = await res.json();
+        setSessionError(data.error || 'Failed to delete classroom');
+      }
+    } catch {
+      setSessionError('Network error deleting classroom');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -264,6 +294,18 @@ export default function HomePage() {
                         }}
                       >
                         <PeopleIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete Classroom (End of Semester)">
+                      <IconButton
+                        size="small"
+                        sx={{ bgcolor: '#FEE2E2' }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirmClassroom(classroom);
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" sx={{ color: '#DC2626' }} />
                       </IconButton>
                     </Tooltip>
                   </Stack>
@@ -472,6 +514,40 @@ export default function HomePage() {
           fetchClassrooms();
         }}
       />
+
+      {/* Delete Classroom Confirmation Dialog */}
+      <Dialog open={Boolean(deleteConfirmClassroom)} onClose={() => setDeleteConfirmClassroom(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700, color: '#DC2626' }}>
+          Delete Classroom?
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 1 }}>
+            You are about to permanently delete:
+          </Typography>
+          <Typography variant="body1" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, mb: 1 }}>
+            {deleteConfirmClassroom?.course_code}: {deleteConfirmClassroom?.course_name}
+          </Typography>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2 }}>
+            Section: <strong>{deleteConfirmClassroom?.section_name}</strong>
+          </Typography>
+          <Alert severity="error" sx={{ borderRadius: '8px' }}>
+            This will permanently erase all sessions, attendance records, and student enrollments for this section. This cannot be undone.
+          </Alert>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDeleteConfirmClassroom(null)} variant="outlined" disabled={!!deletingId}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => deleteConfirmClassroom && handleDeleteClassroom(deleteConfirmClassroom)}
+            variant="contained"
+            color="error"
+            disabled={!!deletingId}
+          >
+            {deletingId ? 'Deleting...' : 'Delete Permanently'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </AppShell>
   );
 }

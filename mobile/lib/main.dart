@@ -330,22 +330,106 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                   onAction: user?.role == 'student' ? _openJoinDialog : null,
                 )
               else
-                ..._classrooms.map((c) => ClassroomCardWidget(
-                      id: c.id,
-                      courseCode: c.courseCode,
-                      courseName: c.courseName,
-                      sectionName: c.sectionName,
-                      teacherName: c.teacherName,
-                      studentCount: c.studentCount,
-                      joinCode: c.joinCode,
-                      selected: _selectedClassroomId == c.id,
-                      onTap: () {
-                        setState(() {
-                          _selectedClassroomId = c.id;
-                        });
-                      },
-                    )),
-              const SizedBox(height: 16),
+                ..._classrooms.map((c) {
+                  final isStudent = user?.role == 'student';
+                  final card = ClassroomCardWidget(
+                    id: c.id,
+                    courseCode: c.courseCode,
+                    courseName: c.courseName,
+                    sectionName: c.sectionName,
+                    teacherName: c.teacherName,
+                    studentCount: c.studentCount,
+                    joinCode: c.joinCode,
+                    selected: _selectedClassroomId == c.id,
+                    onTap: () {
+                      setState(() {
+                        _selectedClassroomId = c.id;
+                      });
+                    },
+                  );
+                  if (!isStudent) return card;
+                  return GestureDetector(
+                    onLongPress: () {
+                      showModalBottomSheet(
+                        context: context,
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                        ),
+                        builder: (ctx) => SafeArea(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 8),
+                              Container(
+                                width: 40,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: M3Tokens.outlineVariant,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              ListTile(
+                                leading: const Icon(Icons.exit_to_app, color: Colors.red),
+                                title: const Text('Unenroll from Section', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                subtitle: Text('${c.courseCode}: ${c.sectionName}'),
+                                onTap: () async {
+                                  final messenger = ScaffoldMessenger.of(context);
+                                  Navigator.pop(ctx);
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (dctx) => AlertDialog(
+                                      title: const Text('Unenroll?', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      content: Text(
+                                        'Are you sure you want to unenroll from ${c.courseCode}: ${c.courseName} (${c.sectionName})?\n\nYour past attendance records will be retained.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(dctx, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        FilledButton(
+                                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                                          onPressed: () => Navigator.pop(dctx, true),
+                                          child: const Text('Unenroll'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true && mounted) {
+                                    final result = await ClassroomService.unenrollFromClassroom(c.id);
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        backgroundColor: result['success'] ? Colors.green : Colors.red,
+                                        content: Text(result['success'] ? result['message'] : result['error']),
+                                      ),
+                                    );
+                                    if (result['success'] && mounted) _loadClassrooms();
+                                  }
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                    child: card,
+                  );
+                }),
+              const SizedBox(height: 8),
+              if (user?.role == 'student')
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 13, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text('Long-press a card to unenroll', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    ],
+                  ),
+                ),
+
               Container(
                 decoration: BoxDecoration(
                   color: M3Tokens.surface,

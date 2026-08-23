@@ -223,4 +223,70 @@ router.get('/:id/roster', authenticateToken, requireRole('teacher'), async (req,
   }
 });
 
+// DELETE /classrooms/:id — Teacher permanently deletes a classroom and all related data
+router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const classroomId = req.params.id;
+
+    // Check ownership
+    const classCheck = await client.query('SELECT * FROM classrooms WHERE id = $1', [classroomId]);
+    if (classCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Classroom not found' });
+    }
+    if (classCheck.rows[0].teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: You do not own this classroom' });
+    }
+
+    await client.query('BEGIN');
+
+    // Cascade delete: attendance_records → sessions → enrollments → classroom
+    await client.query(
+      `DELETE FROM attendance_records
+       WHERE session_id IN (SELECT id FROM sessions WHERE classroom_id = $1)`,
+      [classroomId]
+    );
+    await client.query('DELETE FROM sessions WHERE classroom_id = $1', [classroomId]);
+    await client.query('DELETE FROM enrollments WHERE classroom_id = $1', [classroomId]);
+    await client.query('DELETE FROM classrooms WHERE id = $1', [classroomId]);
+
+    await client.query('COMMIT');
+
+    res.json({ message: 'Classroom deleted successfully' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting classroom:', err);
+    res.status(500).json({ error: 'Failed to delete classroom' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /classrooms/:id/leave — Student unenrolls from a classroom
+router.delete('/:id/leave', authenticateToken, requireRole('student'), async (req, res) => {
+  try {
+    const classroomId = req.params.id;
+
+    // Check enrollment exists
+    const enrollCheck = await db.query(
+      'SELECT id FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      [classroomId, req.user.id]
+    );
+
+    if (enrollCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'You are not enrolled in this classroom' });
+    }
+
+    await db.query(
+      'DELETE FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      [classroomId, req.user.id]
+    );
+
+    res.json({ message: 'Successfully unenrolled from classroom' });
+  } catch (err) {
+    console.error('Error unenrolling from classroom:', err);
+    res.status(500).json({ error: 'Failed to unenroll from classroom' });
+  }
+});
+
 module.exports = router;

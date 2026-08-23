@@ -91,4 +91,29 @@ class ClassroomService {
       return {'success': false, 'error': 'Network error: $e'};
     }
   }
+
+  static Future<Map<String, dynamic>> unenrollFromClassroom(String classroomId) async {
+    try {
+      final token = AuthService.token;
+      if (token == null) return {'success': false, 'error': 'Not authenticated'};
+
+      final response = await http.delete(
+        Uri.parse('$baseUrl/classrooms/$classroomId/leave'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'message': data['message']};
+      } else {
+        return {'success': false, 'error': data['error'] ?? 'Failed to unenroll'};
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Network error: $e'};
+    }
+  }
 }
