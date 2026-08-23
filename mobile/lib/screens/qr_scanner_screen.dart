@@ -172,9 +172,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 children: [
                   const Icon(Icons.flash_on, size: 18, color: M3Tokens.onSecondaryContainer),
                   const SizedBox(width: 8),
-                  Text(
-                    'Capture Latency (ACL): ${aclMs}ms',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: M3Tokens.onSecondaryContainer),
+                  Expanded(
+                    child: Text(
+                      'Capture Latency (ACL): ${aclMs}ms',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: M3Tokens.onSecondaryContainer),
+                    ),
                   ),
                 ],
               ),
@@ -306,36 +308,42 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
                   // 3-Frame Accumulator Status
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [0, 1, 2].map((idx) {
                       final hasFrame = _frameBuffer.containsKey(idx);
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: hasFrame ? M3Tokens.primary : M3Tokens.surfaceVariant,
-                          borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
-                          border: Border.all(
-                            color: hasFrame ? M3Tokens.primary : M3Tokens.outlineVariant,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              hasFrame ? Icons.check_circle : Icons.radio_button_unchecked,
-                              size: 14,
-                              color: hasFrame ? Colors.white : M3Tokens.onSurfaceVariant,
+                      return Expanded(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          margin: const EdgeInsets.symmetric(horizontal: 3),
+                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                          decoration: BoxDecoration(
+                            color: hasFrame ? M3Tokens.primary : M3Tokens.surfaceVariant,
+                            borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
+                            border: Border.all(
+                              color: hasFrame ? M3Tokens.primary : M3Tokens.outlineVariant,
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Frame ${idx + 1}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                hasFrame ? Icons.check_circle : Icons.radio_button_unchecked,
+                                size: 13,
                                 color: hasFrame ? Colors.white : M3Tokens.onSurfaceVariant,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  'Frame ${idx + 1}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: hasFrame ? Colors.white : M3Tokens.onSurfaceVariant,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     }).toList(),
