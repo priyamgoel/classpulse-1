@@ -28,8 +28,8 @@ class User {
 }
 
 class AuthService {
-  // Laptop Wi-Fi IP address for physical phone and local emulator testing
-  static String baseUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://192.168.1.4:4000');
+  // Live Cloud Backend on Render (No local Wi-Fi or USB wires needed!)
+  static String baseUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://classpulse-api-09dw.onrender.com');
 
   static String? _token;
   static User? _currentUser;
