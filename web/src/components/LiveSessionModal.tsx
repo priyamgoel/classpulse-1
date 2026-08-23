@@ -432,7 +432,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         </Typography>
         <Stack direction="row" spacing={2}>
           <Button onClick={onClose} variant="outlined">
-            Minimize Window
+            Hide Projector (Session Still Active)
           </Button>
           <Button
             onClick={handleEndSession}

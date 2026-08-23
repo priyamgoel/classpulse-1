@@ -61,7 +61,10 @@ export default function HomePage() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinModalClassroom, setJoinModalClassroom] = useState<Classroom | null>(null);
   const [rosterDialogClassroom, setRosterDialogClassroom] = useState<Classroom | null>(null);
+  // activeLiveSession holds the running session object (never null while session is live)
+  // liveSessionModalOpen controls whether the projector dialog is visible
   const [activeLiveSession, setActiveLiveSession] = useState<LiveSession | null>(null);
+  const [liveSessionModalOpen, setLiveSessionModalOpen] = useState(false);
 
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -112,6 +115,7 @@ export default function HomePage() {
       const data = await res.json();
       if (res.ok && data.session) {
         setActiveLiveSession(data.session);
+        setLiveSessionModalOpen(true);
       } else {
         setSessionError(data.error || 'Failed to start session');
       }
@@ -164,6 +168,45 @@ export default function HomePage() {
         {sessionError && (
           <Alert severity="error" sx={{ mb: 3 }} onClose={() => setSessionError(null)}>
             {sessionError}
+          </Alert>
+        )}
+
+        {/* Persistent banner shown when a session is running but the projector is hidden */}
+        {activeLiveSession && !liveSessionModalOpen && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 3, alignItems: 'center', borderRadius: '12px' }}
+            action={
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="warning"
+                  onClick={() => setLiveSessionModalOpen(true)}
+                >
+                  Re-open Projector
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="error"
+                  onClick={async () => {
+                    const token = localStorage.getItem('classpulse_token');
+                    await fetch(`${API_BASE_URL}/sessions/${activeLiveSession.id}/end`, {
+                      method: 'POST',
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    setActiveLiveSession(null);
+                    setLiveSessionModalOpen(false);
+                    fetchClassrooms();
+                  }}
+                >
+                  End Session
+                </Button>
+              </Stack>
+            }
+          >
+            <strong>Live session is active</strong> — {activeLiveSession.course_code}: {activeLiveSession.course_name} ({activeLiveSession.section_name}). Students can still scan. Re-open the projector or end the session.
           </Alert>
         )}
 
@@ -420,11 +463,12 @@ export default function HomePage() {
         classroom={rosterDialogClassroom}
       />
       <LiveSessionModal
-        open={Boolean(activeLiveSession)}
+        open={liveSessionModalOpen}
         session={activeLiveSession}
-        onClose={() => setActiveLiveSession(null)}
+        onClose={() => setLiveSessionModalOpen(false)}
         onSessionEnded={() => {
           setActiveLiveSession(null);
+          setLiveSessionModalOpen(false);
           fetchClassrooms();
         }}
       />
