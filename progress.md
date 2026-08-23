@@ -29,6 +29,7 @@ This project is built strictly according to the following 3 core specification f
 | **Part 6** | Homepages & Dashboards | **COMPLETED** | `5959c99` | Teacher analytics dashboard (`AttendanceAnalyticsView.tsx`) with 4 top metrics, student attendance performance table, student drill-down modal, past sessions timeline, and future-proof card grid (`PulseMeter*`, `Quizzes*`, `Forum*`); Student mobile attendance dashboard (`attendance_dashboard_screen.dart`) with overall percentage card, per-subject breakdown, and interactive session history drill-downs. |
 | **Part 7** | CI/CD & Distribution | **COMPLETED** | `10682c8` | GitHub Actions multi-job pipeline (`.github/workflows/ci.yml`) for automated backend, web, and mobile testing & APK generation; Android camera & internet permissions; and comprehensive [`DEPLOYMENT_GUIDE.md`](file:///C:/Users/priya/OneDrive/Documents/priyam-goel/5th-sem/ucs503_SE/classpulse-1/DEPLOYMENT_GUIDE.md). |
 | **Enhancements** | Lifecycle Management | **COMPLETED** | `b35c404` | Teacher classroom deletion (end of semester cascade delete) with M3 red confirmation dialog (`DELETE /classrooms/:id`); Student unenrollment on mobile via long-press bottom sheet (`DELETE /classrooms/:id/leave`). |
+| **Enhancements** | Projector Distance Scanning | **COMPLETED** | `1520387` | Low-density chunky QR matrix (`level="L"`, compact payload); Web Fullscreen Projector mode (540px–680px SVG with floating live roster); Flutter scanner with `[1x, 2x, 3x]` zoom selector buttons for back-bench students. |
 
 ---
 
