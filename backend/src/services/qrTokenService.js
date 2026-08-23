@@ -23,9 +23,19 @@ async function generate3QrSequence(sessionId) {
 
   const tokens = [];
   for (let seqIdx = 0; seqIdx < 3; seqIdx++) {
-    const tokenId = crypto.randomBytes(8).toString('hex');
+    const tokenId = crypto.randomBytes(6).toString('hex');
     const signaturePayload = `${sessionId}:${batchId}:${seqIdx}:${timestamp}:${tokenId}`;
     const hash = computeHmac(signaturePayload);
+
+    // Compact QR string payload for low-density, high-readability QR codes
+    const compactPayload = JSON.stringify({
+      s: sessionId,
+      b: batchId,
+      i: seqIdx,
+      t: timestamp,
+      k: tokenId,
+      h: hash,
+    });
 
     tokens.push({
       session_id: sessionId,
@@ -34,6 +44,7 @@ async function generate3QrSequence(sessionId) {
       timestamp,
       token_id: tokenId,
       hash,
+      qr_payload: compactPayload,
     });
   }
 
@@ -70,23 +81,33 @@ async function validateAndMarkAttendance({ sessionId, tokens, scanStartedAt, stu
     };
   }
 
+  // Normalize tokens to support both compact ({s, b, i, t, k, h}) and standard format
+  const normalizedTokens = tokens.map((t) => ({
+    session_id: t.session_id || t.s,
+    batch_id: t.batch_id || t.b,
+    seq_idx: t.seq_idx !== undefined ? Number(t.seq_idx) : (t.i !== undefined ? Number(t.i) : -1),
+    timestamp: Number(t.timestamp || t.t || 0),
+    token_id: t.token_id || t.k || '',
+    hash: t.hash || t.h || '',
+  }));
+
   // 2. Sequence ordering check: index 0, 1, 2
   for (let i = 0; i < 3; i++) {
-    if (tokens[i].seq_idx !== i) {
+    if (normalizedTokens[i].seq_idx !== i) {
       return {
         valid: false,
         statusCode: 400,
-        error: `Sequence ordering violation: Expected token index ${i}, received ${tokens[i].seq_idx}.`,
+        error: `Sequence ordering violation: Expected token index ${i}, received ${normalizedTokens[i].seq_idx}.`,
       };
     }
   }
 
-  const batchId = tokens[0].batch_id;
-  const tokenTimestamp = Number(tokens[0].timestamp);
+  const batchId = normalizedTokens[0].batch_id;
+  const tokenTimestamp = Number(normalizedTokens[0].timestamp);
 
   // 3. Consistency check across tokens
   for (let i = 0; i < 3; i++) {
-    if (tokens[i].batch_id !== batchId || tokens[i].session_id !== sessionId) {
+    if (normalizedTokens[i].batch_id !== batchId || normalizedTokens[i].session_id !== sessionId) {
       return {
         valid: false,
         statusCode: 400,
@@ -108,10 +129,10 @@ async function validateAndMarkAttendance({ sessionId, tokens, scanStartedAt, stu
 
   // 5. Cryptographic signature check (HMAC-SHA256)
   for (let i = 0; i < 3; i++) {
-    const signaturePayload = `${sessionId}:${batchId}:${i}:${tokens[i].timestamp}:${tokens[i].token_id}`;
+    const signaturePayload = `${sessionId}:${batchId}:${i}:${normalizedTokens[i].timestamp}:${normalizedTokens[i].token_id}`;
     const expectedHash = computeHmac(signaturePayload);
 
-    if (tokens[i].hash !== expectedHash) {
+    if (normalizedTokens[i].hash !== expectedHash) {
       return {
         valid: false,
         statusCode: 400,

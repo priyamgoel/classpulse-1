@@ -25,6 +25,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
   bool _isSubmitting = false;
   bool _isCompleted = false;
+  double _currentZoomFactor = 1.0; // 1x, 2x, 3x
 
   @override
   void dispose() {
@@ -41,16 +42,30 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
       try {
         final data = jsonDecode(rawValue);
-        if (data is Map<String, dynamic> &&
-            data.containsKey('session_id') &&
-            data.containsKey('batch_id') &&
-            data.containsKey('seq_idx') &&
-            data.containsKey('hash')) {
-          _processDecodedToken(data);
-          break;
+        if (data is Map<String, dynamic>) {
+          // Support both low-density compact format ({s, b, i, t, k, h}) and standard format
+          final sessionId = (data['session_id'] ?? data['s'])?.toString();
+          final batchId = (data['batch_id'] ?? data['b'])?.toString();
+          final seqIdxRaw = data['seq_idx'] ?? data['i'];
+          final hash = (data['hash'] ?? data['h'])?.toString();
+          final timestamp = data['timestamp'] ?? data['t'];
+          final tokenId = (data['token_id'] ?? data['k'])?.toString() ?? '';
+
+          if (sessionId != null && batchId != null && seqIdxRaw != null && hash != null) {
+            final normalized = {
+              'session_id': sessionId,
+              'batch_id': batchId,
+              'seq_idx': (seqIdxRaw as num).toInt(),
+              'timestamp': timestamp,
+              'token_id': tokenId,
+              'hash': hash,
+            };
+            _processDecodedToken(normalized);
+            break;
+          }
         }
       } catch (_) {
-        // Not a JSON QR code, ignore non-matching barcodes
+        // Ignore non-matching barcodes
       }
     }
   }
@@ -240,6 +255,17 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     );
   }
 
+  void _setZoomLevel(double factor) {
+    setState(() {
+      _currentZoomFactor = factor;
+    });
+    // Map 1x -> 0.0, 2x -> 0.4, 3x -> 0.8 scale on MobileScanner
+    final scale = factor == 1.0 ? 0.0 : (factor == 2.0 ? 0.4 : 0.8);
+    try {
+      _cameraController.setZoomScale(scale);
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -275,8 +301,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           // 2. Viewfinder Target Overlay
           Center(
             child: Container(
-              width: 260,
-              height: 260,
+              width: 270,
+              height: 270,
               decoration: BoxDecoration(
                 border: Border.all(color: M3Tokens.primary, width: 3),
                 borderRadius: BorderRadius.circular(20),
@@ -284,7 +310,48 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             ),
           ),
 
-          // 3. Top / Bottom Instruction & Frame Capture HUD
+          // 3. Quick Zoom Selector Floating Buttons (1x, 2x, 3x) for Back-Bench Scanning
+          Positioned(
+            top: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [1.0, 2.0, 3.0].map((zoom) {
+                    final isSelected = _currentZoomFactor == zoom;
+                    return GestureDetector(
+                      onTap: () => _setZoomLevel(zoom),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isSelected ? M3Tokens.primary : Colors.transparent,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${zoom.toInt()}x',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ),
+
+          // 4. Bottom Instruction & Frame Capture HUD
           Positioned(
             bottom: 30,
             left: 20,
@@ -292,7 +359,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: M3Tokens.surface.withValues(alpha: 0.92),
+                color: M3Tokens.surface.withValues(alpha: 0.94),
                 borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
                 boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
               ),
@@ -306,7 +373,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // 3-Frame Accumulator Status
+                  // 3-Frame Accumulator Status (Responsive flex width)
                   Row(
                     children: [0, 1, 2].map((idx) {
                       final hasFrame = _frameBuffer.containsKey(idx);

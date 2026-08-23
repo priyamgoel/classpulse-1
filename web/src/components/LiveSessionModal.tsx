@@ -29,6 +29,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PersonIcon from '@mui/icons-material/Person';
 import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens } from '@/theme/tokens';
@@ -61,6 +63,7 @@ interface QrToken {
   timestamp: number;
   token_id: string;
   hash: string;
+  qr_payload?: string;
 }
 
 interface TokenBatch {
@@ -89,16 +92,17 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const rotationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const fullscreenContainerRef = useRef<HTMLDivElement | null>(null);
 
   // 1. Initialize Socket.io & Fetch Existing Roster
   useEffect(() => {
     if (!open || !session) return;
 
-    // Connect to Socket.io server
     const socket = io(API_BASE_URL);
     socketRef.current = socket;
 
@@ -106,10 +110,8 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
       socket.emit('join_session', session.id);
     });
 
-    // Listen for live student attendance marks
     socket.on('attendance:marked', (data: any) => {
       setAttendees((prev) => {
-        // Prevent duplicate entries in UI list
         if (prev.some((a) => a.student.id === data.student.id)) return prev;
         return [
           {
@@ -124,13 +126,9 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
       });
     });
 
-    // Fetch initial roster from backend
     fetchRoster(session.id);
-
-    // Initial batch fetch
     fetchActiveTokens(session.id);
 
-    // Poll new token batches every 3 seconds to keep tokens fresh
     fetchIntervalRef.current = setInterval(() => {
       fetchActiveTokens(session.id);
     }, 3000);
@@ -213,6 +211,9 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
       });
       const data = await res.json();
       if (res.ok) {
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        }
         onSessionEnded();
         onClose();
       } else {
@@ -225,14 +226,162 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     }
   };
 
+  const toggleFullscreen = () => {
+    setIsFullscreen((prev) => !prev);
+  };
+
   if (!session) return null;
 
   const currentToken = tokenBatch?.tokens?.[currentFrameIdx] || null;
-  const qrStringPayload = currentToken ? JSON.stringify(currentToken) : '';
+  // Use compact qr_payload string for maximum dot thickness and scannability
+  const qrStringPayload = currentToken
+    ? currentToken.qr_payload || JSON.stringify(currentToken)
+    : '';
 
+  // -------------------------------------------------------------
+  // Fullscreen Theater / Projector View
+  // -------------------------------------------------------------
+  if (isFullscreen) {
+    return (
+      <Box
+        ref={fullscreenContainerRef}
+        sx={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          bgcolor: '#FFFFFF',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          p: 3,
+          boxSizing: 'border-box',
+        }}
+      >
+        {/* Fullscreen Header */}
+        <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Chip label="LIVE PROJECTOR MODE" color="error" sx={{ fontWeight: 900, fontSize: '0.85rem' }} />
+            <Typography variant="h5" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
+              {session.course_code}: {session.course_name}
+            </Typography>
+            <Typography variant="subtitle1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+              Section: <strong>{session.section_name}</strong>
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={1.5}>
+            <Button
+              variant="outlined"
+              startIcon={<FullscreenExitIcon />}
+              onClick={toggleFullscreen}
+            >
+              Exit Fullscreen
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              onClick={handleEndSession}
+              disabled={ending}
+            >
+              {ending ? 'Ending...' : 'End Session'}
+            </Button>
+          </Stack>
+        </Box>
+
+        {/* Center: Massive Chunky QR Code */}
+        <Box sx={{ textAlign: 'center', my: 'auto' }}>
+          <Box
+            sx={{
+              p: 3,
+              bgcolor: '#FFFFFF',
+              borderRadius: '24px',
+              border: `4px solid ${m3Tokens.color.primary}`,
+              boxShadow: '0px 10px 40px rgba(0, 0, 0, 0.12)',
+              display: 'inline-block',
+            }}
+          >
+            {qrStringPayload ? (
+              <QRCodeSVG
+                value={qrStringPayload}
+                size={540}
+                level="L" // Low error correction = biggest, thickest scannable dots
+                includeMargin={true}
+                fgColor="#000000"
+                bgColor="#FFFFFF"
+              />
+            ) : (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 540, height: 540 }}>
+                <CircularProgress size={60} />
+              </Box>
+            )}
+          </Box>
+
+          {/* Rotating Frame Status Tracker */}
+          <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 2.5 }}>
+            {[0, 1, 2].map((idx) => (
+              <Chip
+                key={idx}
+                label={`Frame ${idx + 1} / 3`}
+                color={currentFrameIdx === idx ? 'primary' : 'default'}
+                variant={currentFrameIdx === idx ? 'filled' : 'outlined'}
+                sx={{
+                  fontWeight: 800,
+                  fontSize: '1rem',
+                  py: 2.5,
+                  px: 2,
+                  borderRadius: '12px',
+                  transform: currentFrameIdx === idx ? 'scale(1.15)' : 'scale(1)',
+                  transition: 'all 0.15s ease-in-out',
+                }}
+              />
+            ))}
+          </Stack>
+        </Box>
+
+        {/* Fullscreen Bottom Roster Ribbon */}
+        <Box
+          sx={{
+            width: '100%',
+            maxWidth: 1100,
+            p: 1.5,
+            bgcolor: m3Tokens.color.background,
+            borderRadius: '16px',
+            border: `1px solid ${m3Tokens.color.outlineVariant}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Chip
+              icon={<CheckCircleIcon sx={{ fontSize: '1.1rem !important' }} />}
+              label={`${attendees.length} Students Present`}
+              color="success"
+              sx={{ fontWeight: 800, fontSize: '0.9rem', py: 1.5 }}
+            />
+            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+              {attendees.length > 0
+                ? `Latest: ${attendees[0].student.full_name} (${attendees[0].acl_ms ? `${attendees[0].acl_ms}ms ACL` : 'recorded'})`
+                : 'Point mobile camera at projector to get marked PRESENT'}
+            </Typography>
+          </Stack>
+          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            Anti-Proxy HMAC-SHA256 • Low-Density Optimized Matrix
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // Standard Modal View (With 1-Click Fullscreen Button)
+  // -------------------------------------------------------------
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle sx={{ p: 2.5, bgcolor: m3Tokens.color.surface, borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+      <DialogTitle sx={{ p: 2.5, bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Box>
             <Stack direction="row" spacing={1} alignItems="center">
@@ -245,9 +394,20 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               Section: <strong>{session.section_name}</strong> • Started at {new Date(session.started_at).toLocaleTimeString()}
             </Typography>
           </Box>
-          <IconButton onClick={onClose} size="small">
-            <CloseIcon />
-          </IconButton>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<FullscreenIcon />}
+              onClick={toggleFullscreen}
+              sx={{ fontWeight: 700 }}
+            >
+              Fullscreen Projector
+            </Button>
+            <IconButton onClick={onClose} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Stack>
         </Stack>
       </DialogTitle>
 
@@ -266,47 +426,46 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               sx={{
                 p: 3,
                 textAlign: 'center',
-                borderRadius: m3Tokens.shape.large,
+                borderRadius: '16px',
                 border: `2px solid ${m3Tokens.color.primary}`,
-                bgcolor: m3Tokens.color.surface,
+                bgcolor: '#FFFFFF',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                minHeight: 460,
+                minHeight: 480,
               }}
             >
-              <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.primary, mb: 1 }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.primary, mb: 0.5 }}>
                 Anti-Proxy Rotating 3-QR Stream
               </Typography>
-              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2.5, maxWidth: 420 }}>
-                Students scan this stream with the ClassPulse mobile camera. The app automatically captures the 3 sequential frames.
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2, maxWidth: 420 }}>
+                Low-density matrix enabled for high-distance scanning.
               </Typography>
 
               {/* QR Code Container */}
               <Box
                 sx={{
-                  p: 2.5,
+                  p: 2,
                   bgcolor: '#FFFFFF',
-                  borderRadius: m3Tokens.shape.medium,
-                  boxShadow: '0px 4px 20px rgba(0, 0, 0, 0.08)',
+                  borderRadius: '16px',
+                  border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                  boxShadow: '0px 4px 20px rgba(0, 0, 0, 0.06)',
                   display: 'inline-block',
-                  mb: 2.5,
-                  minWidth: 280,
-                  minHeight: 280,
+                  mb: 2,
                 }}
               >
                 {qrStringPayload ? (
                   <QRCodeSVG
                     value={qrStringPayload}
-                    size={260}
-                    level="M"
-                    includeMargin={false}
+                    size={320}
+                    level="L" // Low error correction = Chunky scannable blocks
+                    includeMargin={true}
                     fgColor="#000000"
                     bgColor="#FFFFFF"
                   />
                 ) : (
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 260 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 320, height: 320 }}>
                     <CircularProgress />
                   </Box>
                 )}
@@ -331,7 +490,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               </Stack>
 
               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-                Rotating every 800ms • Cryptographically signed with HMAC-SHA256
+                Rotating every 800ms • Tip: Click <strong>"Fullscreen Projector"</strong> for large lecture halls
               </Typography>
             </Paper>
           </Grid>
@@ -342,10 +501,10 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               elevation={0}
               sx={{
                 p: 2.5,
-                borderRadius: m3Tokens.shape.large,
+                borderRadius: '16px',
                 border: `1px solid ${m3Tokens.color.outlineVariant}`,
-                bgcolor: m3Tokens.color.surface,
-                height: 460,
+                bgcolor: '#FFFFFF',
+                height: 480,
                 display: 'flex',
                 flexDirection: 'column',
               }}
@@ -383,7 +542,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                         sx={{
                           px: 1,
                           py: 1,
-                          borderRadius: m3Tokens.shape.small,
+                          borderRadius: '8px',
                           '&:hover': { bgcolor: m3Tokens.color.surfaceVariant },
                         }}
                       >
@@ -426,7 +585,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         </Grid>
       </DialogContent>
 
-      <DialogActions sx={{ p: 2.5, bgcolor: m3Tokens.color.surface, borderTop: `1px solid ${m3Tokens.color.outlineVariant}`, justifyContent: 'space-between' }}>
+      <DialogActions sx={{ p: 2.5, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}`, justifyContent: 'space-between' }}>
         <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
           Total Attendance Marked: <strong>{attendees.length} students</strong>
         </Typography>
