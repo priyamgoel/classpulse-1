@@ -31,7 +31,7 @@ This project is built strictly according to the following 3 core specification f
 | **Enhancements** | Lifecycle Management | **COMPLETED** | `b35c404` | Teacher classroom deletion (end of semester cascade delete) with M3 red confirmation dialog (`DELETE /classrooms/:id`); Student unenrollment on mobile via long-press bottom sheet (`DELETE /classrooms/:id/leave`). |
 | **Enhancements** | Projector Distance Scanning | **COMPLETED** | `1520387`, `df18324`, `2a2c114`, `e4277bf` | Edge-to-edge maximized QR code (`calc(100vh - 32px)`) in Fullscreen Projector mode with zero wasted top/bottom margins; Real-time `800ms / 300ms / 100ms` stream rotation speed selector; Flutter mobile scanner with `[1x, 2x, 5x, 10x, 15x, 20x]` zoom buttons for far-distance scanning. |
 | **Enhancements** | Analytics Navigation & Robustness | **COMPLETED** | `4b4ec09` | Fixed mobile attendance dashboard type casting for String vs num PostgreSQL numerics; Connected top navigation "Attendance" tab in web dashboard to dedicated section analytics view with live section selector dropdown. |
-| **Enhancements** | CI Pipeline & Gradle Wrapper Fix | **COMPLETED** | `a7c2a61` | Fixed Android CI build failure in GitHub Actions by restoring valid Gradle wrapper 8.10.2 distribution URL compatible with AGP 8.7.0. |
+| **Enhancements** | CI Pipeline & Gradle Wrapper Fix | **COMPLETED** | `f197e0d` | Fixed Android CI build failure in GitHub Actions by restoring valid Gradle wrapper 8.10.2 distribution URL compatible with AGP 8.7.0. |
 
 ---
 
