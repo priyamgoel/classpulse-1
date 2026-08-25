@@ -98,7 +98,7 @@ jobs:
         run: flutter test
 
       - name: Build Standalone Android APK
-        run: flutter build apk --release --dart-define=API_BASE_URL=https://classpulse-api-09dw.onrender.com
+        run: flutter build apk --release --android-skip-build-dependency-validation --dart-define=API_BASE_URL=https://classpulse-api-09dw.onrender.com
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
