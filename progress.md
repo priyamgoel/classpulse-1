@@ -31,6 +31,7 @@ This project is built strictly according to the following 3 core specification f
 | **Enhancements** | Lifecycle Management | **COMPLETED** | `b35c404` | Teacher classroom deletion (end of semester cascade delete) with M3 red confirmation dialog (`DELETE /classrooms/:id`); Student unenrollment on mobile via long-press bottom sheet (`DELETE /classrooms/:id/leave`). |
 | **Enhancements** | Projector Distance Scanning | **COMPLETED** | `1520387`, `df18324`, `2a2c114`, `e4277bf` | Edge-to-edge maximized QR code (`calc(100vh - 32px)`) in Fullscreen Projector mode with zero wasted top/bottom margins; Real-time `800ms / 300ms / 100ms` stream rotation speed selector; Flutter mobile scanner with `[1x, 2x, 5x, 10x, 15x, 20x]` zoom buttons for far-distance scanning. |
 | **Enhancements** | Analytics Navigation & Robustness | **COMPLETED** | `4b4ec09` | Fixed mobile attendance dashboard type casting for String vs num PostgreSQL numerics; Connected top navigation "Attendance" tab in web dashboard to dedicated section analytics view with live section selector dropdown. |
+| **Enhancements** | CI Pipeline & Gradle Wrapper Fix | **COMPLETED** | `a7c2a61` | Fixed Android CI build failure in GitHub Actions by restoring valid Gradle wrapper 8.10.2 distribution URL compatible with AGP 8.7.0. |
 
 ---
 
@@ -114,7 +115,9 @@ This project is built strictly according to the following 3 core specification f
 - **GitHub Actions Multi-Job Pipeline (`.github/workflows/ci.yml`)**:
   - Automated CI workflow executing on every push to `main`: `backend-ci` (Node 20), `web-ci` (Next.js production build), and `mobile-ci` (Java 17, Flutter 3.x, analyze, test, and debug APK build).
 - **Android Permissions & Configuration**: Configured `INTERNET`, `CAMERA`, and autofocus hardware features in `mobile/android/app/src/main/AndroidManifest.xml` with app label `ClassPulse`.
-- **Deployment Documentation (`DEPLOYMENT_GUIDE.md`)**: Comprehensive instructions covering local running, Render backend hosting, Vercel web hosting, and Firebase App Distribution for pilot Android APK rollouts.
+### Action 9: CI Pipeline & Gradle Wrapper Fix
+- **Issue**: GitHub Actions CI workflow failed at the `Mobile App (Flutter Android APK Builder)` step because the Gradle wrapper `distributionUrl` was pointing to `gradle-8.14.0-all.zip`, which returned 404 from Gradle distribution mirrors.
+- **Fix**: Restored `distributionUrl` in `mobile/android/gradle/wrapper/gradle-wrapper.properties` to `https\://services.gradle.org/distributions/gradle-8.10.2-all.zip`, which is the tested, officially supported Gradle distribution for Android Gradle Plugin 8.7.0 and Flutter Android builds.
 
 ---
 
