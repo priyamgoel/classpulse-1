@@ -1,24 +1,26 @@
 const nodemailer = require('nodemailer');
 
 function createTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const host = (process.env.SMTP_HOST || '').trim();
+  const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const user = (process.env.SMTP_USER || '').trim();
+  const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '');
 
   if (host && user && pass) {
-    const isGmail = host.toLowerCase().includes('gmail');
+    const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
 
     if (isGmail) {
       return nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true, // Direct SSL
         auth: {
           user,
           pass,
         },
-        connectionTimeout: 8000,
-        greetingTimeout: 8000,
-        socketTimeout: 10000,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
       });
     }
 
@@ -30,9 +32,9 @@ function createTransporter() {
         user,
         pass,
       },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 10000,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
       tls: {
         rejectUnauthorized: false,
       },
@@ -68,7 +70,7 @@ async function sendLowAttendanceWarningEmail({
   totalCount,
 }) {
   const mailTransporter = createTransporter();
-  const user = process.env.SMTP_USER;
+  const user = (process.env.SMTP_USER || '').trim();
   const fromAddress = process.env.EMAIL_FROM || (user ? `"ClassPulse Academic Alert" <${user}>` : '"ClassPulse Academic Alert" <no-reply@classpulse.edu>');
 
   const subject = `⚠️ [ClassPulse Warning] Low Attendance Alert in ${courseCode} (${attendancePct}%)`;

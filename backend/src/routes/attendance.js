@@ -517,12 +517,23 @@ router.post('/classroom/:id/send-warnings', authenticateToken, requireRole('teac
           email: student.email,
           attendance_percentage: student.attendance_percentage,
           status: 'FAILED',
+          error: emailErr.message || 'SMTP delivery failed',
         });
       }
     }
 
+    const sentCount = dispatched.filter((d) => d.status === 'SENT').length;
+    const failedList = dispatched.filter((d) => d.status === 'FAILED');
+
+    if (sentCount === 0 && failedList.length > 0) {
+      return res.status(400).json({
+        error: `Failed to dispatch warning email: ${failedList[0].error}`,
+        notified: dispatched,
+      });
+    }
+
     res.json({
-      message: `Dispatched low attendance warnings to ${dispatched.filter(d => d.status === 'SENT').length} students.`,
+      message: `Successfully dispatched low attendance warnings to ${sentCount} student${sentCount === 1 ? '' : 's'}.${failedList.length > 0 ? ` (${failedList.length} failed)` : ''}`,
       count: dispatched.length,
       threshold,
       total_sessions: totalSessions,
@@ -530,7 +541,7 @@ router.post('/classroom/:id/send-warnings', authenticateToken, requireRole('teac
     });
   } catch (err) {
     console.error('Error sending attendance warnings:', err);
-    res.status(500).json({ error: 'Failed to send attendance warnings' });
+    res.status(500).json({ error: 'Failed to send attendance warnings: ' + (err.message || 'Internal error') });
   }
 });
 
