@@ -17,16 +17,12 @@ async function sendLowAttendanceWarningEmail({
   const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
   const user = (process.env.SMTP_USER || '').trim();
 
-  // Determine fromAddress
-  let fromAddress = process.env.EMAIL_FROM;
-  if (!fromAddress) {
-    if (resendApiKey) {
-      fromAddress = 'ClassPulse Academic Alert <onboarding@resend.dev>';
-    } else if (user) {
-      fromAddress = `"ClassPulse Academic Alert" <${user}>`;
-    } else {
-      fromAddress = '"ClassPulse Academic Alert" <no-reply@classpulse.edu>';
-    }
+  // For Resend: use onboarding@resend.dev unless a custom verified domain is explicitly provided
+  let fromAddress = 'ClassPulse Academic Alert <onboarding@resend.dev>';
+  if (process.env.EMAIL_FROM && !process.env.EMAIL_FROM.includes('@gmail.com') && !process.env.EMAIL_FROM.includes('@resend.com')) {
+    fromAddress = process.env.EMAIL_FROM;
+  } else if (!resendApiKey && user) {
+    fromAddress = `"ClassPulse Academic Alert" <${user}>`;
   }
 
   const subject = `⚠️ [ClassPulse Warning] Low Attendance Alert in ${courseCode} (${attendancePct}%)`;
@@ -138,7 +134,7 @@ ClassPulse Academic Notification Platform`;
           Authorization: `Bearer ${resendApiKey}`,
         },
         body: JSON.stringify({
-          from: fromAddress,
+          from: 'ClassPulse Academic Alert <onboarding@resend.dev>',
           to: [to],
           subject,
           text: plainText,
