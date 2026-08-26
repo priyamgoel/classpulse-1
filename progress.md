@@ -32,10 +32,12 @@ This project is built strictly according to the following 3 core specification f
 | **Enhancements** | Projector Distance Scanning | **COMPLETED** | `1520387`, `df18324`, `2a2c114`, `e4277bf` | Edge-to-edge maximized QR code (`calc(100vh - 32px)`) in Fullscreen Projector mode with zero wasted top/bottom margins; Real-time `800ms / 300ms / 100ms` stream rotation speed selector; Flutter mobile scanner with `[1x, 2x, 5x, 10x, 15x, 20x]` zoom buttons for far-distance scanning. |
 | **Enhancements** | Analytics Navigation & Robustness | **COMPLETED** | `4b4ec09` | Fixed mobile attendance dashboard type casting for String vs num PostgreSQL numerics; Connected top navigation "Attendance" tab in web dashboard to dedicated section analytics view with live section selector dropdown. |
 | **Enhancements** | CI Pipeline & AGP/Gradle Compatibility | **COMPLETED** | `512a811` | Upgraded AGP to `8.11.1` in `settings.gradle.kts`, updated Gradle wrapper to `8.14`, and added `--android-skip-build-dependency-validation` in CI workflow. |
+| **Enhancements** | Matrix Export, Override & Warning System | **COMPLETED** | Working | CSV & Excel (.xlsx) matrix report generator (`exportService.js`); Teacher manual attendance override (`POST /attendance/override`); Low-attendance shortage warnings on Web & Mobile + `nodemailer` email dispatch engine (`emailService.js`). |
 
 ---
 
 ## Detailed Log of Completed Actions
+
 
 ### Action 1: Environment & Repository Initialization (Part 1)
 - **Git Repo**: Cloned empty GitHub repository `https://github.com/priyamgoel/classpulse-1.git` locally.
@@ -121,6 +123,20 @@ This project is built strictly according to the following 3 core specification f
   - Upgraded Gradle wrapper to `https\://services.gradle.org/distributions/gradle-8.14-all.zip` in `mobile/android/gradle/wrapper/gradle-wrapper.properties`.
   - Upgraded Android Gradle Plugin to `8.11.1` in `mobile/android/settings.gradle.kts`.
   - Added `--android-skip-build-dependency-validation` flag to `flutter build apk` step in `.github/workflows/ci.yml` to prevent runner version mismatches from breaking CI builds.
+
+### Action 10: Matrix Export, Manual Override & Low Attendance Email Warnings
+- **CSV & Excel (.xlsx) Matrix Exporter (`backend/src/services/exportService.js`)**:
+  - Implemented attendance matrix generation with students in rows and chronological sessions in columns (`S1, S2, ...`).
+  - Marked entries using standard `P` (Present) and `A` (Absent), with summary columns for total attended, total sessions, percentage, and eligibility status (`Eligible` vs `Shortage Warning`).
+  - Added formatted `.xlsx` output using `exceljs` with custom header styles, colored status cells, and auto-adjusted column widths.
+  - Added REST endpoint: `GET /attendance/classroom/:id/export?format=csv|xlsx`.
+- **Manual Attendance Override (`backend/src/routes/attendance.js`, `web/src/components/AttendanceAnalyticsView.tsx`)**:
+  - Added endpoint `POST /attendance/override` allowing instructors to manually flip a student's attendance between `PRESENT` and `ABSENT`.
+  - Added interactive "Mark Present" / "Mark Absent" action controls inside the Student Drill-Down modal with instantaneous optimistic UI updates.
+- **Low Attendance Warning & Email Dispatch Engine (`backend/src/services/emailService.js`, `mobile/.../attendance_dashboard_screen.dart`)**:
+  - Added `nodemailer` integration with HTML/plain-text email templates informing students when attendance falls below the 75% threshold.
+  - Added instructor-triggered warning modal on Web Analytics (`POST /attendance/classroom/:id/send-warnings`) showing flagged student count and one-click email blast.
+  - Added M3 warning alert banners and shortage chips across both Teacher Web Dashboard and Student Mobile App.
 
 ---
 

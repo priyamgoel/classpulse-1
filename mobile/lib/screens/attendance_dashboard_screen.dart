@@ -192,6 +192,14 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
     final attendedTotal = _parseInt(_overallStats?['attended_sessions'], 0);
     final totalSessions = _parseInt(_overallStats?['total_sessions'], 0);
 
+    final lowAttendanceCourses = _summaries.where((s) {
+      final pct = _parseDouble(s['attendance_percentage'], 100.0);
+      final total = _parseInt(s['total_sessions'], 0);
+      return total > 0 && pct < 75.0;
+    }).toList();
+
+    final hasShortage = (totalSessions > 0 && overallPct < 75.0) || lowAttendanceCourses.isNotEmpty;
+
     return Scaffold(
       backgroundColor: M3Tokens.surface,
       appBar: AppBar(
@@ -217,6 +225,49 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Low Attendance Warning Banner
+                    if (hasShortage) ...[
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF3E0),
+                          borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
+                          border: Border.all(color: const Color(0xFFFFB74D)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: Color(0xFFE65100), size: 24),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Attendance Shortage Warning',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: Color(0xFFE65100),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    lowAttendanceCourses.isNotEmpty
+                                        ? 'You have attendance below 75% in ${lowAttendanceCourses.map((c) => c['course_code']).join(', ')}. Please attend upcoming lectures to avoid exam debarment.'
+                                        : 'Your cumulative attendance is currently below the mandatory 75% threshold.',
+                                    style: const TextStyle(fontSize: 12, color: Color(0xFF5D4037)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     // 1. Overall Summary Metric Card
                     Container(
                       width: double.infinity,
@@ -243,10 +294,10 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                             children: [
                               Text(
                                 '$overallPct%',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 36,
                                   fontWeight: FontWeight.w800,
-                                  color: M3Tokens.onPrimaryContainer,
+                                  color: overallPct < 75 ? Colors.red.shade900 : M3Tokens.onPrimaryContainer,
                                 ),
                               ),
                               Container(
@@ -273,7 +324,7 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                               value: (overallPct / 100.0).clamp(0.0, 1.0),
                               minHeight: 8,
                               backgroundColor: M3Tokens.surface.withValues(alpha: 0.5),
-                              color: overallPct >= 75 ? Colors.green : Colors.orange,
+                              color: overallPct >= 75 ? Colors.green : Colors.red,
                             ),
                           ),
                         ],
@@ -309,13 +360,17 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                         final pct = _parseDouble(s['attendance_percentage'], 100.0);
                         final attended = _parseInt(s['attended_sessions'], 0);
                         final total = _parseInt(s['total_sessions'], 0);
+                        final isCourseShortage = total > 0 && pct < 75.0;
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
-                            side: const BorderSide(color: M3Tokens.outlineVariant),
+                            side: BorderSide(
+                              color: isCourseShortage ? Colors.red.shade200 : M3Tokens.outlineVariant,
+                              width: isCourseShortage ? 1.5 : 1.0,
+                            ),
                           ),
                           child: InkWell(
                             borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
@@ -354,10 +409,10 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: pct >= 75 ? Colors.green.shade50 : Colors.orange.shade50,
+                                          color: pct >= 75 ? Colors.green.shade50 : Colors.red.shade50,
                                           borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
                                           border: Border.all(
-                                            color: pct >= 75 ? Colors.green.shade200 : Colors.orange.shade200,
+                                            color: pct >= 75 ? Colors.green.shade200 : Colors.red.shade300,
                                           ),
                                         ),
                                         child: Text(
@@ -365,7 +420,7 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                                           style: TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 13,
-                                            color: pct >= 75 ? Colors.green.shade800 : Colors.orange.shade800,
+                                            color: pct >= 75 ? Colors.green.shade800 : Colors.red.shade900,
                                           ),
                                         ),
                                       ),
@@ -400,7 +455,7 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                                       value: total > 0 ? (attended / total).clamp(0.0, 1.0) : 1.0,
                                       minHeight: 5,
                                       backgroundColor: M3Tokens.surfaceVariant,
-                                      color: pct >= 75 ? Colors.green : Colors.orange,
+                                      color: pct >= 75 ? Colors.green : Colors.red,
                                     ),
                                   ),
                                 ],
