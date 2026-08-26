@@ -32,7 +32,7 @@ This project is built strictly according to the following 3 core specification f
 | **Enhancements** | Projector Distance Scanning | **COMPLETED** | `1520387`, `df18324`, `2a2c114`, `e4277bf` | Edge-to-edge maximized QR code (`calc(100vh - 32px)`) in Fullscreen Projector mode with zero wasted top/bottom margins; Real-time `800ms / 300ms / 100ms` stream rotation speed selector; Flutter mobile scanner with `[1x, 2x, 5x, 10x, 15x, 20x]` zoom buttons for far-distance scanning. |
 | **Enhancements** | Analytics Navigation & Robustness | **COMPLETED** | `4b4ec09` | Fixed mobile attendance dashboard type casting for String vs num PostgreSQL numerics; Connected top navigation "Attendance" tab in web dashboard to dedicated section analytics view with live section selector dropdown. |
 | **Enhancements** | CI Pipeline & AGP/Gradle Compatibility | **COMPLETED** | `512a811` | Upgraded AGP to `8.11.1` in `settings.gradle.kts`, updated Gradle wrapper to `8.14`, and added `--android-skip-build-dependency-validation` in CI workflow. |
-| **Enhancements** | Matrix Export, Override & Warning System | **COMPLETED** | Working | CSV & Excel (.xlsx) matrix report generator (`exportService.js`); Teacher manual attendance override (`POST /attendance/override`); Low-attendance shortage warnings on Web & Mobile + `nodemailer` email dispatch engine (`emailService.js`). |
+| **Enhancements** | Matrix Export, Override & Warning System | **COMPLETED** | `f414b4f` | CSV & Excel (.xlsx) matrix report generator (`exportService.js`); Teacher manual attendance override (`POST /attendance/override`); Low-attendance shortage warnings on Web & Mobile + `nodemailer` email dispatch engine (`emailService.js`). |
 
 ---
 
