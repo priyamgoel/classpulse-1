@@ -1,7 +1,7 @@
 const nodemailer = require('nodemailer');
 
 /**
- * Sends low attendance warning email to a student via Resend HTTPS API or SMTP fallback.
+ * Sends low attendance warning email to a student via Brevo HTTPS API, Resend HTTPS API, or SMTP.
  */
 async function sendLowAttendanceWarningEmail({
   to,
@@ -14,16 +14,9 @@ async function sendLowAttendanceWarningEmail({
   attendedCount,
   totalCount,
 }) {
+  const brevoApiKey = (process.env.BREVO_API_KEY || '').trim();
   const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
   const user = (process.env.SMTP_USER || '').trim();
-
-  // For Resend: use onboarding@resend.dev unless a custom verified domain is explicitly provided
-  let fromAddress = 'ClassPulse Academic Alert <onboarding@resend.dev>';
-  if (process.env.EMAIL_FROM && !process.env.EMAIL_FROM.includes('@gmail.com') && !process.env.EMAIL_FROM.includes('@resend.com')) {
-    fromAddress = process.env.EMAIL_FROM;
-  } else if (!resendApiKey && user) {
-    fromAddress = `"ClassPulse Academic Alert" <${user}>`;
-  }
 
   const subject = `⚠️ [ClassPulse Warning] Low Attendance Alert in ${courseCode} (${attendancePct}%)`;
 
@@ -124,7 +117,49 @@ Please ensure you attend all upcoming lectures to meet the minimum eligibility c
 -- 
 ClassPulse Academic Notification Platform`;
 
-  // 1. Primary Cloud Method: Resend HTTPS API (Port 443 — Never blocked by cloud firewalls)
+  // 1. Primary: Brevo HTTPS API (Port 443 — sends to any recipient without custom domain requirement)
+  if (brevoApiKey) {
+    try {
+      const senderEmail = (process.env.BREVO_SENDER_EMAIL || process.env.EMAIL_FROM || 'priyamgoel36@gmail.com').replace(/.*<([^>]+)>.*/, '$1').trim();
+      const senderName = 'ClassPulse Academic Alert';
+
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': brevoApiKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: {
+            name: senderName,
+            email: senderEmail,
+          },
+          to: [
+            {
+              email: to,
+              name: studentName,
+            },
+          ],
+          subject,
+          htmlContent,
+          textContent: plainText,
+        }),
+      });
+
+      const resData = await response.json();
+      if (!response.ok) {
+        throw new Error(resData.message || resData.error || `Brevo API failed with status ${response.status}`);
+      }
+
+      return { messageId: resData.messageId || `brevo_${Date.now()}` };
+    } catch (brevoErr) {
+      console.error('Error dispatching via Brevo HTTPS API:', brevoErr);
+      throw brevoErr;
+    }
+  }
+
+  // 2. Secondary: Resend HTTPS API (Port 443)
   if (resendApiKey) {
     try {
       const response = await fetch('https://api.resend.com/emails', {
@@ -154,10 +189,11 @@ ClassPulse Academic Notification Platform`;
     }
   }
 
-  // 2. Secondary Fallback: SMTP (For local development on machine)
+  // 3. Tertiary Fallback: SMTP (For local development on machine)
   const host = (process.env.SMTP_HOST || '').trim();
   const port = parseInt(process.env.SMTP_PORT || '465', 10);
   const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '');
+  const fromAddress = process.env.EMAIL_FROM || (user ? `"ClassPulse Academic Alert" <${user}>` : '"ClassPulse Academic Alert" <no-reply@classpulse.edu>');
 
   if (host && user && pass) {
     const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
@@ -189,10 +225,10 @@ ClassPulse Academic Notification Platform`;
     return info;
   }
 
-  // 3. Fallback: Simulation mode
+  // 4. Fallback: Simulation mode
   console.log('--- [EMAIL DISPATCH SIMULATION (No API Key or SMTP configured)] ---');
   console.log(`To: ${to}`);
-  console.log(`From: ${fromAddress}`);
+  console.log(`From: ClassPulse Academic Alert`);
   console.log(`Subject: ${subject}`);
   console.log('-------------------------------------------------------------------');
   return { messageId: `mock_${Date.now()}` };
