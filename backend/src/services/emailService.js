@@ -1,17 +1,28 @@
 const nodemailer = require('nodemailer');
 
-let transporter = null;
-
-function getTransporter() {
-  if (transporter) return transporter;
-
+function createTransporter() {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
   if (host && user && pass) {
-    transporter = nodemailer.createTransport({
+    const isGmail = host.toLowerCase().includes('gmail');
+
+    if (isGmail) {
+      return nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user,
+          pass,
+        },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
+      });
+    }
+
+    return nodemailer.createTransport({
       host,
       port,
       secure: port === 465,
@@ -19,24 +30,27 @@ function getTransporter() {
         user,
         pass,
       },
-    });
-  } else {
-    // If SMTP is not configured, create a test or log-only transporter
-    transporter = {
-      isMock: true,
-      sendMail: async (mailOptions) => {
-        console.log('--- [EMAIL DISPATCH SIMULATION (SMTP Not Configured)] ---');
-        console.log(`To: ${mailOptions.to}`);
-        console.log(`From: ${mailOptions.from}`);
-        console.log(`Subject: ${mailOptions.subject}`);
-        console.log(`Body:\n${mailOptions.text}`);
-        console.log('---------------------------------------------------------');
-        return { messageId: `mock_${Date.now()}` };
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+      tls: {
+        rejectUnauthorized: false,
       },
-    };
+    });
   }
 
-  return transporter;
+  // If SMTP is not configured, create a mock simulation transporter
+  return {
+    isMock: true,
+    sendMail: async (mailOptions) => {
+      console.log('--- [EMAIL DISPATCH SIMULATION (SMTP Not Configured)] ---');
+      console.log(`To: ${mailOptions.to}`);
+      console.log(`From: ${mailOptions.from}`);
+      console.log(`Subject: ${mailOptions.subject}`);
+      console.log('---------------------------------------------------------');
+      return { messageId: `mock_${Date.now()}` };
+    },
+  };
 }
 
 /**
@@ -53,8 +67,9 @@ async function sendLowAttendanceWarningEmail({
   attendedCount,
   totalCount,
 }) {
-  const mailTransporter = getTransporter();
-  const fromAddress = process.env.EMAIL_FROM || '"ClassPulse Academic Alert" <no-reply@classpulse.edu>';
+  const mailTransporter = createTransporter();
+  const user = process.env.SMTP_USER;
+  const fromAddress = process.env.EMAIL_FROM || (user ? `"ClassPulse Academic Alert" <${user}>` : '"ClassPulse Academic Alert" <no-reply@classpulse.edu>');
 
   const subject = `⚠️ [ClassPulse Warning] Low Attendance Alert in ${courseCode} (${attendancePct}%)`;
 
