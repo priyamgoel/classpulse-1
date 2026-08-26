@@ -1,62 +1,7 @@
 const nodemailer = require('nodemailer');
 
-function createTransporter() {
-  const host = (process.env.SMTP_HOST || '').trim();
-  const port = parseInt(process.env.SMTP_PORT || '465', 10);
-  const user = (process.env.SMTP_USER || '').trim();
-  const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '');
-
-  if (host && user && pass) {
-    const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
-
-    if (isGmail) {
-      return nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true, // Direct SSL
-        auth: {
-          user,
-          pass,
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000,
-      });
-    }
-
-    return nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: {
-        user,
-        pass,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
-  }
-
-  // If SMTP is not configured, create a mock simulation transporter
-  return {
-    isMock: true,
-    sendMail: async (mailOptions) => {
-      console.log('--- [EMAIL DISPATCH SIMULATION (SMTP Not Configured)] ---');
-      console.log(`To: ${mailOptions.to}`);
-      console.log(`From: ${mailOptions.from}`);
-      console.log(`Subject: ${mailOptions.subject}`);
-      console.log('---------------------------------------------------------');
-      return { messageId: `mock_${Date.now()}` };
-    },
-  };
-}
-
 /**
- * Sends low attendance warning email to a student.
+ * Sends low attendance warning email to a student via Resend HTTPS API or SMTP fallback.
  */
 async function sendLowAttendanceWarningEmail({
   to,
@@ -69,9 +14,20 @@ async function sendLowAttendanceWarningEmail({
   attendedCount,
   totalCount,
 }) {
-  const mailTransporter = createTransporter();
+  const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
   const user = (process.env.SMTP_USER || '').trim();
-  const fromAddress = process.env.EMAIL_FROM || (user ? `"ClassPulse Academic Alert" <${user}>` : '"ClassPulse Academic Alert" <no-reply@classpulse.edu>');
+
+  // Determine fromAddress
+  let fromAddress = process.env.EMAIL_FROM;
+  if (!fromAddress) {
+    if (resendApiKey) {
+      fromAddress = 'ClassPulse Academic Alert <onboarding@resend.dev>';
+    } else if (user) {
+      fromAddress = `"ClassPulse Academic Alert" <${user}>`;
+    } else {
+      fromAddress = '"ClassPulse Academic Alert" <no-reply@classpulse.edu>';
+    }
+  }
 
   const subject = `⚠️ [ClassPulse Warning] Low Attendance Alert in ${courseCode} (${attendancePct}%)`;
 
@@ -172,15 +128,78 @@ Please ensure you attend all upcoming lectures to meet the minimum eligibility c
 -- 
 ClassPulse Academic Notification Platform`;
 
-  const info = await mailTransporter.sendMail({
-    from: fromAddress,
-    to,
-    subject,
-    text: plainText,
-    html: htmlContent,
-  });
+  // 1. Primary Cloud Method: Resend HTTPS API (Port 443 — Never blocked by cloud firewalls)
+  if (resendApiKey) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${resendApiKey}`,
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: [to],
+          subject,
+          text: plainText,
+          html: htmlContent,
+        }),
+      });
 
-  return info;
+      const resData = await response.json();
+      if (!response.ok) {
+        throw new Error(resData.message || resData.error || `Resend API failed with status ${response.status}`);
+      }
+
+      return { messageId: resData.id || `resend_${Date.now()}` };
+    } catch (apiErr) {
+      console.error('Error dispatching via Resend HTTPS API:', apiErr);
+      throw apiErr;
+    }
+  }
+
+  // 2. Secondary Fallback: SMTP (For local development on machine)
+  const host = (process.env.SMTP_HOST || '').trim();
+  const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '');
+
+  if (host && user && pass) {
+    const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
+
+    const mailTransporter = nodemailer.createTransport({
+      host: isGmail ? 'smtp.gmail.com' : host,
+      port: isGmail ? 465 : port,
+      secure: isGmail ? true : port === 465,
+      auth: {
+        user,
+        pass,
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+      tls: {
+        rejectUnauthorized: false,
+      },
+    });
+
+    const info = await mailTransporter.sendMail({
+      from: fromAddress,
+      to,
+      subject,
+      text: plainText,
+      html: htmlContent,
+    });
+
+    return info;
+  }
+
+  // 3. Fallback: Simulation mode
+  console.log('--- [EMAIL DISPATCH SIMULATION (No API Key or SMTP configured)] ---');
+  console.log(`To: ${to}`);
+  console.log(`From: ${fromAddress}`);
+  console.log(`Subject: ${subject}`);
+  console.log('-------------------------------------------------------------------');
+  return { messageId: `mock_${Date.now()}` };
 }
 
 module.exports = {
