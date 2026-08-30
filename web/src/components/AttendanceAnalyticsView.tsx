@@ -46,7 +46,21 @@ import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import EmailIcon from '@mui/icons-material/Email';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import EditIcon from '@mui/icons-material/Edit';
-import { m3Tokens } from '@/theme/tokens';
+import ShowChartIcon from '@mui/icons-material/ShowChart';
+import BarChartIcon from '@mui/icons-material/BarChart';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ReferenceLine,
+} from 'recharts';
+import { m3Tokens, chartTokens } from '@/theme/tokens';
 
 interface AttendanceAnalyticsViewProps {
   classroomId: string;
@@ -290,6 +304,33 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
     );
   }
 
+  // Process chronological sessions data for Recharts visualizations
+  const chronologicalSessions = [...sessions].sort(
+    (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+  );
+
+  const totalEnrolledCount = stats?.total_enrolled || (students.length > 0 ? students.length : 1);
+
+  const attendanceTrendData = chronologicalSessions.map((s, idx) => {
+    const rate = totalEnrolledCount > 0
+      ? Math.min(100, Math.round((s.present_count / totalEnrolledCount) * 100))
+      : 0;
+    const dateObj = new Date(s.started_at);
+    const shortDate = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const acl = s.avg_acl_ms ? parseInt(s.avg_acl_ms, 10) : 0;
+
+    return {
+      name: `Session #${idx + 1}`,
+      label: `S${idx + 1} (${shortDate})`,
+      date: shortDate,
+      time: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      present: s.present_count,
+      total: totalEnrolledCount,
+      rate: rate,
+      acl_ms: acl,
+    };
+  });
+
   return (
     <Box sx={{ width: '100%' }}>
       {/* Top Header Controls (Export & Email Warnings) */}
@@ -501,7 +542,230 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
         </Grid>
       </Grid>
 
-      {/* 2. Per-Student Attendance Breakdown Table */}
+      {/* 2. Visual Analytics Charts (Recharts) */}
+      <Grid container spacing={2.5} sx={{ mb: 3.5 }}>
+        {/* Chart A: Attendance % Trend Across Sessions */}
+        <Grid item xs={12} md={7}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2.5,
+              borderRadius: '12px',
+              border: `1px solid ${m3Tokens.color.outlineVariant}`,
+              bgcolor: '#FFFFFF',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Box>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <ShowChartIcon sx={{ color: chartTokens.primary, fontSize: 20 }} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                    Attendance Turnout Trend
+                  </Typography>
+                </Stack>
+                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                  Turnout percentage over chronological sessions with 75% threshold
+                </Typography>
+              </Box>
+            </Stack>
+
+            {attendanceTrendData.length === 0 ? (
+              <Box sx={{ flexGrow: 1, minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                  No session attendance history to chart yet.
+                </Typography>
+              </Box>
+            ) : (
+              <Box sx={{ width: '100%', height: 260 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={attendanceTrendData} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="attendanceGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={chartTokens.primary} stopOpacity={0.35} />
+                        <stop offset="95%" stopColor={chartTokens.primary} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke={chartTokens.axis}
+                      tick={{ fill: chartTokens.axis, fontSize: 11 }}
+                      axisLine={{ stroke: chartTokens.tooltipBorder }}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      ticks={[0, 25, 50, 75, 100]}
+                      unit="%"
+                      stroke={chartTokens.axis}
+                      tick={{ fill: chartTokens.axis, fontSize: 11 }}
+                      axisLine={{ stroke: chartTokens.tooltipBorder }}
+                    />
+                    <ReferenceLine
+                      y={75}
+                      stroke={chartTokens.error}
+                      strokeDasharray="4 4"
+                      label={{
+                        value: '75% Threshold',
+                        fill: chartTokens.error,
+                        position: 'insideTopRight',
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    />
+                    <RechartsTooltip
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <Paper
+                              elevation={3}
+                              sx={{
+                                p: 1.5,
+                                borderRadius: '8px',
+                                border: `1px solid ${chartTokens.tooltipBorder}`,
+                                bgcolor: chartTokens.tooltipBg,
+                              }}
+                            >
+                              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                                {data.name} • {data.date}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 0.5 }}>
+                                Time: {data.time}
+                              </Typography>
+                              <Divider sx={{ my: 0.5 }} />
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: chartTokens.primary }} />
+                                <Typography variant="body2" sx={{ fontWeight: 700, color: chartTokens.primary }}>
+                                  Turnout: {data.rate}% ({data.present} / {data.total} students)
+                                </Typography>
+                              </Stack>
+                            </Paper>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="rate"
+                      name="Attendance Rate"
+                      stroke={chartTokens.primary}
+                      strokeWidth={2.5}
+                      fillOpacity={1}
+                      fill="url(#attendanceGradient)"
+                      dot={{ r: 4, fill: chartTokens.primary, strokeWidth: 2, stroke: '#FFFFFF' }}
+                      activeDot={{ r: 6, fill: chartTokens.primary }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+          </Paper>
+        </Grid>
+
+        {/* Chart B: ACL (Capture Latency) Distribution Across Sessions */}
+        <Grid item xs={12} md={5}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2.5,
+              borderRadius: '12px',
+              border: `1px solid ${m3Tokens.color.outlineVariant}`,
+              bgcolor: '#FFFFFF',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Box>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <BarChartIcon sx={{ color: chartTokens.secondary, fontSize: 20 }} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                    Avg Capture Latency (ACL)
+                  </Typography>
+                </Stack>
+                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                  Scan-to-validation response speed in milliseconds
+                </Typography>
+              </Box>
+            </Stack>
+
+            {attendanceTrendData.length === 0 ? (
+              <Box sx={{ flexGrow: 1, minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                  No session latency metrics recorded yet.
+                </Typography>
+              </Box>
+            ) : (
+              <Box sx={{ width: '100%', height: 260 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={attendanceTrendData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke={chartTokens.axis}
+                      tick={{ fill: chartTokens.axis, fontSize: 11 }}
+                      axisLine={{ stroke: chartTokens.tooltipBorder }}
+                    />
+                    <YAxis
+                      unit="ms"
+                      stroke={chartTokens.axis}
+                      tick={{ fill: chartTokens.axis, fontSize: 11 }}
+                      axisLine={{ stroke: chartTokens.tooltipBorder }}
+                    />
+                    <RechartsTooltip
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <Paper
+                              elevation={3}
+                              sx={{
+                                p: 1.5,
+                                borderRadius: '8px',
+                                border: `1px solid ${chartTokens.tooltipBorder}`,
+                                bgcolor: chartTokens.tooltipBg,
+                              }}
+                            >
+                              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                                {data.name}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 0.5 }}>
+                                Date: {data.date} at {data.time}
+                              </Typography>
+                              <Divider sx={{ my: 0.5 }} />
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <FlashOnIcon sx={{ color: 'warning.main', fontSize: 16 }} />
+                                <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                                  Avg Latency: {data.acl_ms > 0 ? `${data.acl_ms}ms` : 'No scans recorded'}
+                                </Typography>
+                              </Stack>
+                            </Paper>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar
+                      dataKey="acl_ms"
+                      name="Capture Latency"
+                      fill={chartTokens.secondary}
+                      radius={[6, 6, 0, 0]}
+                      maxBarSize={40}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* 3. Per-Student Attendance Breakdown Table */}
       <Paper
         elevation={0}
         sx={{

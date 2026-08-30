@@ -15,6 +15,10 @@ export interface ClassroomCardProps {
   studentCount?: number;
   joinCode?: string;
   selected?: boolean;
+  attendanceAvgRate?: number;
+  quizCount?: number;
+  pulsemeterCount?: number;
+  openDoubtsCount?: number;
   onSelect?: (id: string) => void;
 }
 
@@ -27,8 +31,14 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
   studentCount = 0,
   joinCode,
   selected = false,
+  attendanceAvgRate,
+  quizCount = 0,
+  pulsemeterCount = 0,
+  openDoubtsCount = 0,
   onSelect,
 }) => {
+  const isHealthyAttendance = (attendanceAvgRate ?? 100) >= 75;
+
   return (
     <Card
       onClick={() => onSelect && onSelect(id)}
@@ -71,7 +81,48 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
           <SchoolIcon sx={{ color: m3Tokens.color.primary }} />
         </Stack>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2, pt: 1.5, borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+        {/* Micro-Metrics Strip (Iteration 2 — Part 8) */}
+        <Stack direction="row" spacing={1} sx={{ mt: 1.5, mb: 1.5, flexWrap: 'wrap', gap: 0.75 }}>
+          {attendanceAvgRate !== undefined && (
+            <Chip
+              label={`${attendanceAvgRate}% Turnout`}
+              size="small"
+              sx={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                backgroundColor: isHealthyAttendance ? '#E8F5E9' : '#FFF3E0',
+                color: isHealthyAttendance ? '#2E7D32' : '#E65100',
+                border: `1px solid ${isHealthyAttendance ? '#A5D6A7' : '#FFE082'}`,
+              }}
+            />
+          )}
+          {(quizCount > 0 || pulsemeterCount > 0) && (
+            <Chip
+              label={`${quizCount} Quizzes • ${pulsemeterCount} PM`}
+              size="small"
+              sx={{
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                backgroundColor: m3Tokens.color.surfaceVariant,
+                color: m3Tokens.color.onSurfaceVariant,
+              }}
+            />
+          )}
+          {openDoubtsCount > 0 && (
+            <Chip
+              label={`${openDoubtsCount} Open Doubts`}
+              size="small"
+              sx={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                backgroundColor: '#EDE7F6',
+                color: '#5E35B1',
+              }}
+            />
+          )}
+        </Stack>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1, pt: 1.5, borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
           <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
             Instructor: <strong>{teacherName}</strong>
           </Typography>

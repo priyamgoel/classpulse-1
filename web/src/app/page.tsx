@@ -49,6 +49,9 @@ import { ClassroomJoinDetailsModal } from '@/components/ClassroomJoinDetailsModa
 import { ClassroomRosterDialog } from '@/components/ClassroomRosterDialog';
 import { LiveSessionModal, LiveSession } from '@/components/LiveSessionModal';
 import { AttendanceAnalyticsView } from '@/components/AttendanceAnalyticsView';
+import { PulseMeterAuthoringView } from '@/components/PulseMeterAuthoringView';
+import { QuizAuthoringView } from '@/components/QuizAuthoringView';
+import { DoubtForumView } from '@/components/DoubtForumView';
 import { m3Tokens } from '@/theme/tokens';
 
 export interface Classroom {
@@ -61,6 +64,11 @@ export interface Classroom {
   teacher_name: string;
   join_code: string;
   student_count: number;
+  attendance_avg_rate?: number;
+  quiz_count?: number;
+  pulsemeter_count?: number;
+  open_doubts_count?: number;
+  resolved_doubts_count?: number;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
@@ -178,9 +186,9 @@ export default function HomePage() {
 
   const detailTabs = [
     { label: 'Overview & Analytics', disabled: false, tooltip: 'Attendance sessions, stats, and student drill-downs' },
-    { label: 'PulseMeter', disabled: true, tooltip: 'Coming Soon in Iteration 2: Real-time feedback' },
-    { label: 'Quizzes', disabled: true, tooltip: 'Coming Soon in Iteration 2: Live quizzes & leaderboards' },
-    { label: 'Forum', disabled: true, tooltip: 'Coming Soon in Iteration 2: Classroom doubt forum' },
+    { label: 'PulseMeter', disabled: false, tooltip: 'Author and manage reusable PulseMeters' },
+    { label: 'Quizzes', disabled: false, tooltip: 'Author and manage reusable live quizzes' },
+    { label: 'Forum', disabled: false, tooltip: 'Classroom, course-wide, and global doubt resolution forum' },
   ];
 
   return (
@@ -280,6 +288,10 @@ export default function HomePage() {
                         studentCount={classroom.student_count}
                         joinCode={classroom.join_code}
                         selected={selectedClassroomId === classroom.id}
+                        attendanceAvgRate={classroom.attendance_avg_rate}
+                        quizCount={classroom.quiz_count}
+                        pulsemeterCount={classroom.pulsemeter_count}
+                        openDoubtsCount={classroom.open_doubts_count}
                         onSelect={(id) => setSelectedClassroomId(id)}
                       />
                       <Stack
@@ -412,6 +424,26 @@ export default function HomePage() {
               {detailTab === 0 && (
                 <AttendanceAnalyticsView classroomId={selectedClassroom.id} />
               )}
+
+              {/* Tab 1: Embedded PulseMeter Authoring View */}
+              {detailTab === 1 && (
+                <PulseMeterAuthoringView classroomId={selectedClassroom.id} />
+              )}
+
+              {/* Tab 2: Embedded Live Quizzes Authoring View */}
+              {detailTab === 2 && (
+                <QuizAuthoringView classroomId={selectedClassroom.id} />
+              )}
+
+              {/* Tab 3: Embedded Doubt & Discussion Forum */}
+              {detailTab === 3 && (
+                <DoubtForumView
+                  courseId={selectedClassroom.course_id}
+                  classroomId={selectedClassroom.id}
+                  courseCode={selectedClassroom.course_code}
+                  courseName={selectedClassroom.course_name}
+                />
+              )}
             </Paper>
           )}
         </Box>
@@ -480,6 +512,173 @@ export default function HomePage() {
             />
           ) : selectedClassroom ? (
             <AttendanceAnalyticsView classroomId={selectedClassroom.id} />
+          ) : null}
+        </Box>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 2: DEDICATED PULSEMETER PAGE                          */}
+      {/* ========================================================= */}
+      {mainNavTab === 2 && (
+        <Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
+            <Box>
+              <Typography variant="h4" sx={{ color: m3Tokens.color.onSurface, mb: 0.5, fontWeight: 700 }}>
+                PulseMeter Real-Time Polls
+              </Typography>
+              <Typography variant="body1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                Create, organize, and manage reusable student feedback questions and sentiment checks.
+              </Typography>
+            </Box>
+
+            {classrooms.length > 0 && (
+              <FormControl size="small" sx={{ minWidth: 260 }}>
+                <InputLabel id="pulsemeter-classroom-select-label">Select Classroom Section</InputLabel>
+                <Select
+                  labelId="pulsemeter-classroom-select-label"
+                  value={selectedClassroomId || classrooms[0].id}
+                  label="Select Classroom Section"
+                  onChange={(e) => setSelectedClassroomId(e.target.value)}
+                >
+                  {classrooms.map((c) => (
+                    <MenuItem key={c.id} value={c.id}>
+                      <strong>{c.course_code}</strong>: {c.section_name} ({c.course_name})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </Stack>
+
+          {loadingClassrooms ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <CircularProgress />
+            </Box>
+          ) : classrooms.length === 0 ? (
+            <EmptyState
+              title="No Classrooms Available"
+              description="Create a classroom section first to author PulseMeters."
+              actionLabel="Create Classroom"
+              onAction={() => {
+                setMainNavTab(0);
+                setCreateDialogOpen(true);
+              }}
+            />
+          ) : selectedClassroom ? (
+            <PulseMeterAuthoringView classroomId={selectedClassroom.id} />
+          ) : null}
+        </Box>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 3: DEDICATED LIVE QUIZZES PAGE                        */}
+      {/* ========================================================= */}
+      {mainNavTab === 3 && (
+        <Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
+            <Box>
+              <Typography variant="h4" sx={{ color: m3Tokens.color.onSurface, mb: 0.5, fontWeight: 700 }}>
+                Live Quizzing & Leaderboards
+              </Typography>
+              <Typography variant="body1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                Author and launch interactive multi-question quizzes with WIDE and NARROW scoring spreads.
+              </Typography>
+            </Box>
+
+            {classrooms.length > 0 && (
+              <FormControl size="small" sx={{ minWidth: 260 }}>
+                <InputLabel id="quiz-classroom-select-label">Select Classroom Section</InputLabel>
+                <Select
+                  labelId="quiz-classroom-select-label"
+                  value={selectedClassroomId || classrooms[0].id}
+                  label="Select Classroom Section"
+                  onChange={(e) => setSelectedClassroomId(e.target.value)}
+                >
+                  {classrooms.map((c) => (
+                    <MenuItem key={c.id} value={c.id}>
+                      <strong>{c.course_code}</strong>: {c.section_name} ({c.course_name})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </Stack>
+
+          {loadingClassrooms ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <CircularProgress />
+            </Box>
+          ) : classrooms.length === 0 ? (
+            <EmptyState
+              title="No Classrooms Available"
+              description="Create a classroom section first to author and manage live quizzes."
+              actionLabel="Create Classroom"
+              onAction={() => {
+                setMainNavTab(0);
+                setCreateDialogOpen(true);
+              }}
+            />
+          ) : selectedClassroom ? (
+            <QuizAuthoringView classroomId={selectedClassroom.id} />
+          ) : null}
+        </Box>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 4: DEDICATED DOUBT FORUM PAGE                         */}
+      {/* ========================================================= */}
+      {mainNavTab === 4 && (
+        <Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={2} sx={{ mb: 3 }}>
+            <Box>
+              <Typography variant="h4" sx={{ color: m3Tokens.color.onSurface, mb: 0.5, fontWeight: 700 }}>
+                Doubt Resolution & Discussion Forum
+              </Typography>
+              <Typography variant="body1" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                Browse, ask, and answer academic doubts with audience scoping, persistent pseudonyms, and instructor endorsements.
+              </Typography>
+            </Box>
+
+            {classrooms.length > 0 && (
+              <FormControl size="small" sx={{ minWidth: 260 }}>
+                <InputLabel id="forum-classroom-select-label">Select Course / Section</InputLabel>
+                <Select
+                  labelId="forum-classroom-select-label"
+                  value={selectedClassroomId || classrooms[0].id}
+                  label="Select Course / Section"
+                  onChange={(e) => setSelectedClassroomId(e.target.value)}
+                >
+                  {classrooms.map((c) => (
+                    <MenuItem key={c.id} value={c.id}>
+                      <strong>{c.course_code}</strong>: {c.section_name} ({c.course_name})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+          </Stack>
+
+          {loadingClassrooms ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <CircularProgress />
+            </Box>
+          ) : classrooms.length === 0 ? (
+            <EmptyState
+              title="No Courses Available"
+              description="Create a classroom or course first to participate in the doubt forum."
+              actionLabel="Create Classroom"
+              onAction={() => {
+                setMainNavTab(0);
+                setCreateDialogOpen(true);
+              }}
+            />
+          ) : selectedClassroom ? (
+            <DoubtForumView
+              courseId={selectedClassroom.course_id}
+              classroomId={selectedClassroom.id}
+              courseCode={selectedClassroom.course_code}
+              courseName={selectedClassroom.course_name}
+            />
           ) : null}
         </Box>
       )}

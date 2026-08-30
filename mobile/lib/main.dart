@@ -5,6 +5,8 @@ import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/qr_scanner_screen.dart';
 import 'screens/attendance_dashboard_screen.dart';
+import 'screens/pulsemeter_student_view.dart';
+import 'screens/doubt_forum_screen.dart';
 import 'theme/tokens.dart';
 import 'widgets/app_shell.dart';
 import 'widgets/classroom_card.dart';
@@ -101,6 +103,15 @@ class _ClassPulseMainHostState extends State<ClassPulseMainHost> {
     switch (_currentNavIndex) {
       case 1:
         currentBody = const AttendanceDashboardScreen();
+        break;
+      case 2:
+        currentBody = const PulseMeterStudentView();
+        break;
+      case 3:
+        currentBody = const PulseMeterStudentView();
+        break;
+      case 4:
+        currentBody = const DoubtForumScreen();
         break;
       case 5:
         currentBody = ProfileView(onLogout: widget.onLogout);
@@ -341,6 +352,10 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                     studentCount: c.studentCount,
                     joinCode: c.joinCode,
                     selected: _selectedClassroomId == c.id,
+                    attendanceAvgRate: c.attendanceAvgRate,
+                    quizCount: c.quizCount,
+                    pulsemeterCount: c.pulsemeterCount,
+                    openDoubtsCount: c.openDoubtsCount,
                     onTap: () {
                       setState(() {
                         _selectedClassroomId = c.id;
@@ -453,28 +468,26 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                       indicatorColor: M3Tokens.primary,
                       tabs: const [
                         Tab(text: 'Overview'),
-                        Tab(text: 'PulseMeter*'),
-                        Tab(text: 'Quizzes*'),
-                        Tab(text: 'Forum*'),
+                        Tab(text: 'PulseMeter'),
+                        Tab(text: 'Quizzes'),
+                        Tab(text: 'Forum'),
                       ],
                       onTap: (index) {
-                        if (index != 0) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Tab coming soon in Iteration 2'),
-                              duration: Duration(seconds: 1),
-                            ),
-                          );
-                        }
+                        setState(() {});
                       },
                     ),
                     const SizedBox(height: 16),
-                    EmptyStateWidget(
-                      title: 'Live Attendance Scanner',
-                      description: 'Tap below to launch the multi-frame 3-QR camera scanner.',
-                      actionLabel: user?.role == 'student' ? 'Scan Attendance QR' : null,
-                      onAction: user?.role == 'student' ? _openScannerScreen : null,
-                    ),
+                    if (_detailTabController.index == 1 || _detailTabController.index == 2)
+                      PulseMeterStudentView(initialClassroomId: _selectedClassroomId)
+                    else if (_detailTabController.index == 3)
+                      DoubtForumScreen(initialClassroomId: _selectedClassroomId)
+                    else
+                      EmptyStateWidget(
+                        title: 'Live Attendance Scanner',
+                        description: 'Tap below to launch the multi-frame 3-QR camera scanner.',
+                        actionLabel: user?.role == 'student' ? 'Scan Attendance QR' : null,
+                        onAction: user?.role == 'student' ? _openScannerScreen : null,
+                      ),
                   ],
                 ),
               ),

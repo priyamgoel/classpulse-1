@@ -12,6 +12,10 @@ class Classroom {
   final String teacherName;
   final String joinCode;
   final int studentCount;
+  final double attendanceAvgRate;
+  final int quizCount;
+  final int pulsemeterCount;
+  final int openDoubtsCount;
 
   Classroom({
     required this.id,
@@ -22,6 +26,10 @@ class Classroom {
     required this.teacherName,
     required this.joinCode,
     required this.studentCount,
+    this.attendanceAvgRate = 100.0,
+    this.quizCount = 0,
+    this.pulsemeterCount = 0,
+    this.openDoubtsCount = 0,
   });
 
   factory Classroom.fromJson(Map<String, dynamic> json) {
@@ -34,6 +42,12 @@ class Classroom {
       teacherName: json['teacher_name'] ?? '',
       joinCode: json['join_code'] ?? '',
       studentCount: json['student_count'] ?? 0,
+      attendanceAvgRate: (json['attendance_avg_rate'] != null)
+          ? (json['attendance_avg_rate'] as num).toDouble()
+          : 100.0,
+      quizCount: json['quiz_count'] ?? 0,
+      pulsemeterCount: json['pulsemeter_count'] ?? 0,
+      openDoubtsCount: json['open_doubts_count'] ?? 0,
     );
   }
 }

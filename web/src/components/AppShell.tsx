@@ -61,9 +61,9 @@ export const AppShell: React.FC<AppShellProps> = ({
   const navItems = [
     { label: 'Classrooms', icon: <ClassIcon />, disabled: false, tooltip: 'Manage and view your classrooms' },
     { label: 'Attendance', icon: <EventAvailableIcon />, disabled: false, tooltip: 'Attendance sessions and reports' },
-    { label: 'PulseMeter', icon: <SpeedIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Real-time feedback meter' },
-    { label: 'Quizzes', icon: <QuizIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Live classroom quizzing' },
-    { label: 'Forum', icon: <ForumIcon />, disabled: true, tooltip: 'Coming Soon in Iteration 2: Doubt resolution forum' },
+    { label: 'PulseMeter', icon: <SpeedIcon />, disabled: false, tooltip: 'Real-time student feedback meter and polls' },
+    { label: 'Quizzes', icon: <QuizIcon />, disabled: false, tooltip: 'Live classroom quizzes and leaderboards' },
+    { label: 'Forum', icon: <ForumIcon />, disabled: false, tooltip: 'Doubt resolution and discussion forum' },
     { label: 'Profile', icon: <AccountCircleIcon />, disabled: false, tooltip: 'Account settings & profile' },
   ];
 

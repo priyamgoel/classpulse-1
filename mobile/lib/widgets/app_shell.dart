@@ -32,19 +32,19 @@ class AppShell extends StatelessWidget {
       'label': 'PulseMeter',
       'icon': Icons.speed_outlined,
       'selectedIcon': Icons.speed,
-      'disabled': true,
+      'disabled': false,
     },
     {
       'label': 'Quizzes',
       'icon': Icons.quiz_outlined,
       'selectedIcon': Icons.quiz,
-      'disabled': true,
+      'disabled': false,
     },
     {
       'label': 'Forum',
       'icon': Icons.forum_outlined,
       'selectedIcon': Icons.forum,
-      'disabled': true,
+      'disabled': false,
     },
     {
       'label': 'Profile',

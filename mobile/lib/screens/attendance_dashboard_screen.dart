@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:fl_chart/fl_chart.dart';
 import '../services/auth_service.dart';
 import '../theme/tokens.dart';
 
@@ -186,6 +187,221 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
     );
   }
 
+  Widget _buildAttendanceBarChart() {
+    if (_summaries.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
+        border: Border.all(color: M3Tokens.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.bar_chart_rounded, color: ChartTokens.primary, size: 22),
+                  SizedBox(width: 8),
+                  Text(
+                    'Subject Attendance Rates (%)',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: M3Tokens.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: ChartTokens.primaryContainer,
+                  borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
+                ),
+                child: const Text(
+                  '75% Min',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: ChartTokens.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Visual turnout across enrolled courses with eligibility threshold',
+            style: TextStyle(fontSize: 11, color: M3Tokens.onSurfaceVariant),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            height: 210,
+            child: BarChart(
+              BarChartData(
+                alignment: BarChartAlignment.spaceAround,
+                maxY: 100,
+                minY: 0,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: 25,
+                  getDrawingHorizontalLine: (value) => FlLine(
+                    color: ChartTokens.grid,
+                    strokeWidth: 1,
+                    dashArray: [4, 4],
+                  ),
+                ),
+                extraLinesData: ExtraLinesData(
+                  horizontalLines: [
+                    HorizontalLine(
+                      y: 75,
+                      color: ChartTokens.error,
+                      strokeWidth: 1.5,
+                      dashArray: [6, 4],
+                      label: HorizontalLineLabel(
+                        show: true,
+                        alignment: Alignment.topRight,
+                        padding: const EdgeInsets.only(right: 4, bottom: 2),
+                        style: const TextStyle(
+                          color: ChartTokens.error,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                        labelResolver: (line) => '75% Threshold',
+                      ),
+                    ),
+                  ],
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 36,
+                      interval: 25,
+                      getTitlesWidget: (val, meta) {
+                        return Text(
+                          '${val.toInt()}%',
+                          style: const TextStyle(
+                            color: ChartTokens.axis,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 32,
+                      getTitlesWidget: (val, meta) {
+                        final idx = val.toInt();
+                        if (idx < 0 || idx >= _summaries.length) return const SizedBox.shrink();
+                        final summary = _summaries[idx];
+                        final code = (summary['course_code'] ?? 'Course').toString();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            code.length > 7 ? '${code.substring(0, 6)}…' : code,
+                            style: const TextStyle(
+                              color: ChartTokens.axis,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                borderData: FlBorderData(
+                  show: true,
+                  border: Border(
+                    bottom: BorderSide(color: M3Tokens.outlineVariant),
+                    left: BorderSide(color: M3Tokens.outlineVariant),
+                  ),
+                ),
+                barTouchData: BarTouchData(
+                  enabled: true,
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipColor: (_) => ChartTokens.tooltipBg,
+                    tooltipRoundedRadius: 8,
+                    tooltipBorder: BorderSide(color: ChartTokens.tooltipBorder),
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      final summary = _summaries[groupIndex];
+                      final code = summary['course_code'] ?? '';
+                      final attended = _parseInt(summary['attended_sessions'], 0);
+                      final total = _parseInt(summary['total_sessions'], 0);
+                      return BarTooltipItem(
+                        '$code\n',
+                        const TextStyle(
+                          color: M3Tokens.onSurface,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                        children: [
+                          TextSpan(
+                            text: '${rod.toY.toStringAsFixed(1)}% ($attended/$total)\n',
+                            style: TextStyle(
+                              color: rod.toY >= 75 ? ChartTokens.success : ChartTokens.error,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                          TextSpan(
+                            text: rod.toY >= 75 ? 'Eligible' : 'Shortage Warning',
+                            style: TextStyle(
+                              color: rod.toY >= 75 ? ChartTokens.success : ChartTokens.error,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                barGroups: List.generate(_summaries.length, (idx) {
+                  final s = _summaries[idx];
+                  final pct = _parseDouble(s['attendance_percentage'], 100.0);
+                  final isEligible = pct >= 75.0;
+
+                  return BarChartGroupData(
+                    x: idx,
+                    barRods: [
+                      BarChartRodData(
+                        toY: pct.clamp(0.0, 100.0),
+                        color: isEligible ? ChartTokens.primary : ChartTokens.error,
+                        width: 22,
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                        backDrawRodData: BackgroundBarChartRodData(
+                          show: true,
+                          toY: 100,
+                          color: ChartTokens.barBackground,
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final overallPct = _parseDouble(_overallStats?['attendance_percentage'], 100.0);
@@ -330,9 +546,12 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
 
-                    // 2. Per-Subject Breakdown
+                    // 2. Visual Analytics: fl_chart Subject Attendance Bar Chart
+                    _buildAttendanceBarChart(),
+
+                    // 3. Per-Subject Breakdown
                     const Text(
                       'Enrolled Subjects Breakdown',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: M3Tokens.onSurface),

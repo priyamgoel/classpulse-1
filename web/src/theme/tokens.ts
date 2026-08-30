@@ -40,3 +40,23 @@ export const m3Tokens = {
     fontFamily: '"Roboto", "Segoe UI", "Helvetica", "Arial", sans-serif',
   },
 };
+
+export const chartTokens = {
+  primary: '#6750A4',
+  primaryContainer: '#EADDFF',
+  secondary: '#625B71',
+  tertiary: '#7D5260',
+  success: '#2E7D32',
+  warning: '#ED6C02',
+  error: '#B3261E',
+  grid: '#E7E0EC',
+  axis: '#49454F',
+  tooltipBg: '#FFFFFF',
+  tooltipBorder: '#CAC4D0',
+  gradientPrimaryStart: 'rgba(103, 80, 164, 0.35)',
+  gradientPrimaryEnd: 'rgba(103, 80, 164, 0.02)',
+  gradientSuccessStart: 'rgba(46, 125, 50, 0.35)',
+  gradientSuccessEnd: 'rgba(46, 125, 50, 0.02)',
+  barBackground: '#F4EFF4',
+  palette: ['#6750A4', '#2E7D32', '#7D5260', '#0288D1', '#ED6C02', '#9C27B0'],
+};

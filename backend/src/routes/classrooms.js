@@ -153,14 +153,32 @@ router.post('/join', authenticateToken, requireRole('student'), async (req, res)
   }
 });
 
-// GET /classrooms/mine — List classrooms for authenticated user (Teacher: taught; Student: enrolled)
+// GET /classrooms/mine — List classrooms for authenticated user with cross-feature micro-metrics
 router.get('/mine', authenticateToken, async (req, res) => {
   try {
     if (req.user.role === 'teacher') {
       const result = await db.query(
         `SELECT c.*, co.course_code, co.course_name,
                 $2::text as teacher_name,
-                (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id) as student_count
+                (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id) as student_count,
+                (SELECT COUNT(*)::int FROM quizzes q WHERE q.classroom_id = c.id) as quiz_count,
+                (SELECT COUNT(*)::int FROM pulsemeters p WHERE p.classroom_id = c.id) as pulsemeter_count,
+                (SELECT COUNT(*)::int FROM doubt_posts dp WHERE (dp.classroom_id = c.id OR (dp.course_id = c.course_id AND dp.audience_scope IN ('COURSE', 'APP'))) AND dp.status = 'OPEN') as open_doubts_count,
+                (SELECT COUNT(*)::int FROM doubt_posts dp WHERE (dp.classroom_id = c.id OR (dp.course_id = c.course_id AND dp.audience_scope IN ('COURSE', 'APP'))) AND dp.status = 'RESOLVED') as resolved_doubts_count,
+                COALESCE(
+                  ROUND(
+                    (
+                      SELECT AVG(
+                        CASE WHEN (SELECT COUNT(*) FROM enrollments e WHERE e.classroom_id = c.id) > 0
+                             THEN (SELECT COUNT(*)::numeric FROM attendance_records ar WHERE ar.session_id = s.id) / (SELECT COUNT(*)::numeric FROM enrollments e WHERE e.classroom_id = c.id) * 100
+                             ELSE 0
+                        END
+                      )
+                      FROM sessions s
+                      WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL
+                    ), 1
+                  ), 0
+                )::float as attendance_avg_rate
          FROM classrooms c
          JOIN courses co ON c.course_id = co.id
          WHERE c.teacher_id = $1
@@ -172,6 +190,20 @@ router.get('/mine', authenticateToken, async (req, res) => {
       const result = await db.query(
         `SELECT c.*, co.course_code, co.course_name, u.full_name as teacher_name,
                 (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id) as student_count,
+                (SELECT COUNT(*)::int FROM quizzes q WHERE q.classroom_id = c.id) as quiz_count,
+                (SELECT COUNT(*)::int FROM pulsemeters p WHERE p.classroom_id = c.id) as pulsemeter_count,
+                (SELECT COUNT(*)::int FROM doubt_posts dp WHERE (dp.classroom_id = c.id OR (dp.course_id = c.course_id AND dp.audience_scope IN ('COURSE', 'APP'))) AND dp.status = 'OPEN') as open_doubts_count,
+                (SELECT COUNT(*)::int FROM doubt_posts dp WHERE (dp.classroom_id = c.id OR (dp.course_id = c.course_id AND dp.audience_scope IN ('COURSE', 'APP'))) AND dp.status = 'RESOLVED') as resolved_doubts_count,
+                COALESCE(
+                  ROUND(
+                    (
+                      CASE WHEN (SELECT COUNT(*) FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL) > 0
+                           THEN (SELECT COUNT(*)::numeric FROM attendance_records ar JOIN sessions s ON ar.session_id = s.id WHERE s.classroom_id = c.id AND ar.student_id = $1) / (SELECT COUNT(*)::numeric FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL) * 100
+                           ELSE 100
+                      END
+                    ), 1
+                  ), 100
+                )::float as attendance_avg_rate,
                 en.joined_at
          FROM enrollments en
          JOIN classrooms c ON en.classroom_id = c.id
@@ -186,6 +218,94 @@ router.get('/mine', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching classrooms:', err);
     res.status(500).json({ error: 'Failed to fetch classrooms' });
+  }
+});
+
+// GET /classrooms/:id/summary — Aggregated cross-feature summary metrics for classroom overview
+router.get('/:id/summary', authenticateToken, async (req, res) => {
+  try {
+    const classroomId = req.params.id;
+
+    // Verify classroom exists
+    const classResult = await db.query(
+      `SELECT c.*, co.course_code, co.course_name, u.full_name as teacher_name,
+              (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id) as student_count
+       FROM classrooms c
+       JOIN courses co ON c.course_id = co.id
+       JOIN users u ON c.teacher_id = u.id
+       WHERE c.id = $1`,
+      [classroomId]
+    );
+
+    if (classResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Classroom not found' });
+    }
+
+    const classroom = classResult.rows[0];
+
+    // Attendance stats
+    const attendanceStats = await db.query(
+      `SELECT COUNT(*)::int as total_sessions,
+              COALESCE(
+                ROUND(
+                  AVG(
+                    CASE WHEN $2 > 0
+                         THEN (SELECT COUNT(*)::numeric FROM attendance_records ar WHERE ar.session_id = s.id) / $2 * 100
+                         ELSE 0
+                    END
+                  ), 1
+                ), 0
+              )::float as avg_turnout_pct
+       FROM sessions s
+       WHERE s.classroom_id = $1 AND s.ended_at IS NOT NULL`,
+      [classroomId, classroom.student_count]
+    );
+
+    // Engagement stats (PulseMeters, Quizzes, Active Activity)
+    const pulsemeterCount = await db.query(
+      `SELECT COUNT(*)::int FROM pulsemeters WHERE classroom_id = $1`,
+      [classroomId]
+    );
+
+    const quizCount = await db.query(
+      `SELECT COUNT(*)::int FROM quizzes WHERE classroom_id = $1`,
+      [classroomId]
+    );
+
+    const activeActivity = await db.query(
+      `SELECT * FROM live_activities WHERE classroom_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+      [classroomId]
+    );
+
+    // Doubt Forum stats
+    const doubtStats = await db.query(
+      `SELECT COUNT(dp.id)::int as total_doubts,
+              COUNT(CASE WHEN dp.status = 'OPEN' THEN 1 END)::int as open_doubts,
+              COUNT(CASE WHEN dp.status = 'RESOLVED' THEN 1 END)::int as resolved_doubts,
+              COUNT(dr.id)::int as total_replies
+       FROM doubt_posts dp
+       LEFT JOIN doubt_replies dr ON dp.id = dr.doubt_post_id
+       WHERE dp.classroom_id = $1 OR (dp.course_id = $2 AND dp.audience_scope IN ('COURSE', 'APP'))`,
+      [classroomId, classroom.course_id]
+    );
+
+    res.json({
+      classroom,
+      attendance: {
+        total_sessions: attendanceStats.rows[0].total_sessions,
+        avg_turnout_pct: attendanceStats.rows[0].avg_turnout_pct,
+      },
+      engagement: {
+        pulsemeter_count: pulsemeterCount.rows[0].count,
+        quiz_count: quizCount.rows[0].count,
+        has_active_activity: activeActivity.rows.length > 0,
+        active_activity: activeActivity.rows[0] || null,
+      },
+      forum: doubtStats.rows[0],
+    });
+  } catch (err) {
+    console.error('Error fetching classroom summary:', err);
+    res.status(500).json({ error: 'Failed to fetch classroom summary' });
   }
 });
 

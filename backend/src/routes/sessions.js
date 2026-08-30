@@ -101,6 +101,29 @@ router.post('/:id/end', authenticateToken, requireRole('teacher'), async (req, r
       [sessionId]
     );
 
+    // ---- Section 4b: Resolve pending PulseMeter activities ----
+    // When an attendance Session ends, check for any LiveActivities in this
+    // classroom where attendance_pending = TRUE. These are PulseMeters that
+    // were launched before attendance was taken. Now that we have a finalized
+    // "present" headcount, we can link them to this session.
+    const classroomId = sessionCheck.rows[0].classroom_id;
+    const pendingActivities = await db.query(
+      `SELECT id FROM live_activities
+       WHERE classroom_id = $1 AND attendance_pending = TRUE`,
+      [classroomId]
+    );
+
+    if (pendingActivities.rows.length > 0) {
+      const pendingIds = pendingActivities.rows.map((r) => r.id);
+      await db.query(
+        `UPDATE live_activities
+         SET attendance_session_id = $1, attendance_pending = FALSE
+         WHERE id = ANY($2::uuid[])`,
+        [sessionId, pendingIds]
+      );
+      console.log(`[ClassPulse Session] Resolved ${pendingIds.length} pending live activities against session ${sessionId}`);
+    }
+
     res.json({
       message: 'Attendance session ended successfully',
       session: endResult.rows[0],
