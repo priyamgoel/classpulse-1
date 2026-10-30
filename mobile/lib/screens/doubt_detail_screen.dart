@@ -167,13 +167,129 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
     }
   }
 
+  Future<void> _deletePost() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Question?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'Are you sure you want to delete this question? This will permanently delete the question and all associated answers.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || _post == null) return;
+
+    try {
+      final token = AuthService.token;
+      final res = await http.delete(
+        Uri.parse('${AuthService.baseUrl}/doubts/${_post!['id']}'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200 && mounted) {
+        Navigator.pop(context, true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.green,
+            content: Text('Question deleted successfully'),
+          ),
+        );
+      } else {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['error'] ?? 'Failed to delete question'),
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _deleteReply(String replyId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Answer?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'Are you sure you want to delete this answer? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final token = AuthService.token;
+      final res = await http.delete(
+        Uri.parse('${AuthService.baseUrl}/doubts/replies/$replyId'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.green,
+            content: Text('Answer deleted successfully'),
+          ),
+        );
+        _fetchDoubtDetails();
+      } else {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['error'] ?? 'Failed to delete answer'),
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
+    final canDeletePost = _post != null &&
+        (_post!['author_id'] == AuthService.currentUser?.id ||
+            AuthService.currentUser?.role == 'teacher');
+
     return Scaffold(
       backgroundColor: M3Tokens.surface,
       appBar: AppBar(
         title: const Text('Discussion Thread', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         actions: [
+          if (canDeletePost)
+            IconButton(
+              icon: const Icon(Icons.delete_outline, color: Colors.red),
+              tooltip: 'Delete Question',
+              onPressed: _deletePost,
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _fetchDoubtDetails,
@@ -338,6 +454,8 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
     final isSolution = r['is_solution'] == true;
     final isEndorsed = r['is_teacher_endorsed'] == true;
     final hasMarked = r['user_has_marked_helpful'] == true;
+    final canDeleteReply = r['author_id'] == AuthService.currentUser?.id ||
+        AuthService.currentUser?.role == 'teacher';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -443,6 +561,20 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                       ],
                     ),
                   ),
+                  if (canDeleteReply) ...[
+                    const SizedBox(width: 10),
+                    InkWell(
+                      onTap: () => _deleteReply(r['id']),
+                      child: const Tooltip(
+                        message: 'Delete Answer',
+                        child: Icon(
+                          Icons.delete_outline,
+                          size: 16,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],

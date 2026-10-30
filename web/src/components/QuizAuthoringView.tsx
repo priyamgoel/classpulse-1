@@ -17,6 +17,10 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -27,6 +31,7 @@ import SchoolIcon from '@mui/icons-material/School';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import TimerIcon from '@mui/icons-material/Timer';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { CreateQuizDialog } from './CreateQuizDialog';
 import { LiveQuizModal, QuizInfo } from './LiveQuizModal';
 import { m3Tokens } from '@/theme/tokens';
@@ -71,11 +76,37 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
   const [activeActivityId, setActiveActivityId] = useState<string | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<QuizInfo | null>(null);
 
+  // Delete Quiz State
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     if (classroomId) {
       fetchQuizzes();
     }
   }, [classroomId]);
+
+  const handleDeleteQuiz = async (id: string) => {
+    setDeleting(true);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/quizzes/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setDeleteConfirmId(null);
+        fetchQuizzes();
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Failed to delete Quiz');
+      }
+    } catch {
+      setError('Network error deleting Quiz');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleLaunchQuiz = async (quiz: Quiz) => {
     setLaunchingId(quiz.id);
@@ -356,17 +387,32 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
                   </Box>
 
                   <Box sx={{ pt: 1.5, borderTop: `1px solid ${m3Tokens.color.surfaceVariant}` }}>
-                    <Button
-                      variant="contained"
-                      color="primary"
-                      startIcon={launchingId === quiz.id ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
-                      onClick={() => handleLaunchQuiz(quiz)}
-                      disabled={launchingId !== null}
-                      fullWidth
-                      sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
-                    >
-                      {launchingId === quiz.id ? 'Launching...' : 'Launch Live Quiz Session'}
-                    </Button>
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={launchingId === quiz.id ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
+                        onClick={() => handleLaunchQuiz(quiz)}
+                        disabled={launchingId !== null}
+                        fullWidth
+                        sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
+                      >
+                        {launchingId === quiz.id ? 'Launching...' : 'Launch Live Quiz Session'}
+                      </Button>
+                      <Tooltip title="Delete Quiz">
+                        <IconButton
+                          color="error"
+                          onClick={() => setDeleteConfirmId(quiz.id)}
+                          sx={{
+                            border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                            borderRadius: '8px',
+                            p: 1,
+                          }}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
                   </Box>
                 </Paper>
               </Grid>
@@ -374,6 +420,35 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
           })}
         </Grid>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={Boolean(deleteConfirmId)}
+        onClose={() => !deleting && setDeleteConfirmId(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Delete Quiz?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            Are you sure you want to delete this live quiz and all of its questions? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDeleteConfirmId(null)} disabled={deleting} sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => deleteConfirmId && handleDeleteQuiz(deleteConfirmId)}
+            variant="contained"
+            color="error"
+            disabled={deleting}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Create Dialog */}
       <CreateQuizDialog

@@ -19,6 +19,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _rememberMe = true;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -31,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final result = await AuthService.login(
       email: _emailController.text.trim(),
       password: _passwordController.text.trim(),
+      rememberMe: _rememberMe,
     );
 
     setState(() {
@@ -108,7 +110,36 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 obscureText: true,
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Checkbox(
+                    value: _rememberMe,
+                    activeColor: M3Tokens.primary,
+                    onChanged: (val) {
+                      setState(() {
+                        _rememberMe = val ?? true;
+                      });
+                    },
+                  ),
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _rememberMe = !_rememberMe;
+                      });
+                    },
+                    child: const Text(
+                      'Keep me signed in',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: M3Tokens.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
               FilledButton(
                 onPressed: _isLoading ? null : _handleLogin,
                 style: FilledButton.styleFrom(

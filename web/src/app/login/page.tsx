@@ -11,6 +11,8 @@ import {
   Alert,
   Stack,
   Container,
+  FormControlLabel,
+  Checkbox,
   Link as MuiLink,
 } from '@mui/material';
 import Link from 'next/link';
@@ -22,6 +24,7 @@ import { m3Tokens } from '@/theme/tokens';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -33,12 +36,12 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const result = await login(email, password);
+    const result = await login(email, password, rememberMe);
     setLoading(false);
 
     if (result.success) {
       // Check if user is a student attempting to access Web Dashboard
-      const storedUser = localStorage.getItem('classpulse_user');
+      const storedUser = localStorage.getItem('classpulse_user') || sessionStorage.getItem('classpulse_user');
       if (storedUser) {
         try {
           const parsedUser = JSON.parse(storedUser);
@@ -91,7 +94,7 @@ export default function LoginPage() {
             )}
 
             <form onSubmit={handleSubmit}>
-              <Stack spacing={2.5}>
+              <Stack spacing={2}>
                 <TextField
                   label="Instructor Email"
                   type="email"
@@ -108,6 +111,22 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      color="primary"
+                      size="small"
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, fontWeight: 500 }}>
+                      Keep me signed in
+                    </Typography>
+                  }
+                  sx={{ mt: -0.5, mb: 0.5 }}
+                />
                 <Button
                   type="submit"
                   variant="contained"
@@ -115,6 +134,7 @@ export default function LoginPage() {
                   fullWidth
                   size="large"
                   disabled={loading}
+                  sx={{ py: 1.25 }}
                 >
                   {loading ? 'Signing in...' : 'Sign In as Instructor'}
                 </Button>

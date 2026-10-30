@@ -16,6 +16,7 @@ import {
   Menu,
   MenuItem,
   Avatar,
+  Button,
 } from '@mui/material';
 import ClassIcon from '@mui/icons-material/Class';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
@@ -94,15 +95,39 @@ export const AppShell: React.FC<AppShellProps> = ({
             />
           </Stack>
 
-          {/* User Profile & Logout Menu */}
-          <Stack direction="row" spacing={2} alignItems="center">
+          {/* User Profile & Logout */}
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Typography variant="body2" sx={{ fontWeight: 600, display: { xs: 'none', sm: 'block' }, color: m3Tokens.color.onSurface }}>
+              {user?.full_name}
+            </Typography>
             <Tooltip title="Instructor Account Options">
-              <IconButton onClick={handleProfileMenuOpen} color="primary">
-                <Avatar sx={{ bgcolor: m3Tokens.color.primary, width: 36, height: 36, fontSize: '0.9rem' }}>
+              <IconButton onClick={handleProfileMenuOpen} color="primary" size="small">
+                <Avatar sx={{ bgcolor: m3Tokens.color.primary, width: 34, height: 34, fontSize: '0.85rem' }}>
                   {user?.full_name ? user.full_name[0].toUpperCase() : 'I'}
                 </Avatar>
               </IconButton>
             </Tooltip>
+
+            <Button
+              variant="outlined"
+              color="inherit"
+              size="small"
+              onClick={handleLogout}
+              startIcon={<LogoutIcon fontSize="small" />}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 600,
+                fontSize: '0.8rem',
+                borderColor: m3Tokens.color.outlineVariant,
+                color: m3Tokens.color.onSurfaceVariant,
+                '&:hover': {
+                  borderColor: m3Tokens.color.error,
+                  color: m3Tokens.color.error,
+                },
+              }}
+            >
+              Sign Out
+            </Button>
 
             <Menu
               anchorEl={anchorEl}

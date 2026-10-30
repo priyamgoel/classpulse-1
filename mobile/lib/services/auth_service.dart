@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class User {
   final String id;
@@ -25,6 +26,14 @@ class User {
       createdAt: json['created_at'] ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'email': email,
+    'full_name': fullName,
+    'role': role,
+    'created_at': createdAt,
+  };
 }
 
 class AuthService {
@@ -37,11 +46,34 @@ class AuthService {
   static String? get token => _token;
   static User? get currentUser => _currentUser;
 
+  static const String _keyToken = 'classpulse_token';
+  static const String _keyUser = 'classpulse_user';
+
+  /// Initialize and load saved session from local device storage
+  static Future<bool> init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedToken = prefs.getString(_keyToken);
+      final savedUserJson = prefs.getString(_keyUser);
+
+      if (savedToken != null && savedToken.isNotEmpty && savedUserJson != null && savedUserJson.isNotEmpty) {
+        _token = savedToken;
+        _currentUser = User.fromJson(jsonDecode(savedUserJson));
+        return true;
+      }
+    } catch (e) {
+      // Clear corrupt state
+      await logout();
+    }
+    return false;
+  }
+
   static Future<Map<String, dynamic>> signup({
     required String email,
     required String password,
     required String fullName,
     required String role,
+    bool rememberMe = true,
   }) async {
     try {
       final response = await http.post(
@@ -60,6 +92,13 @@ class AuthService {
       if (response.statusCode == 201) {
         _token = data['token'];
         _currentUser = User.fromJson(data['user']);
+
+        if (rememberMe) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_keyToken, _token!);
+          await prefs.setString(_keyUser, jsonEncode(_currentUser!.toJson()));
+        }
+
         return {'success': true};
       } else {
         return {'success': false, 'error': data['error'] ?? 'Signup failed'};
@@ -72,6 +111,7 @@ class AuthService {
   static Future<Map<String, dynamic>> login({
     required String email,
     required String password,
+    bool rememberMe = true,
   }) async {
     try {
       final response = await http.post(
@@ -88,6 +128,13 @@ class AuthService {
       if (response.statusCode == 200) {
         _token = data['token'];
         _currentUser = User.fromJson(data['user']);
+
+        if (rememberMe) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_keyToken, _token!);
+          await prefs.setString(_keyUser, jsonEncode(_currentUser!.toJson()));
+        }
+
         return {'success': true};
       } else {
         return {'success': false, 'error': data['error'] ?? 'Login failed'};
@@ -97,8 +144,14 @@ class AuthService {
     }
   }
 
-  static void logout() {
+  static Future<void> logout() async {
     _token = null;
     _currentUser = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyToken);
+      await prefs.remove(_keyUser);
+    } catch (_) {}
   }
 }
+

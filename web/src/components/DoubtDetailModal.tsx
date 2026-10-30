@@ -34,6 +34,8 @@ import SendIcon from '@mui/icons-material/Send';
 import SchoolIcon from '@mui/icons-material/School';
 import PublicIcon from '@mui/icons-material/Public';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import { useAuth } from '@/context/AuthContext';
 import { m3Tokens } from '@/theme/tokens';
 
 export interface DoubtReply {
@@ -101,6 +103,10 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const { user } = useAuth();
+  const [deleteDialogTarget, setDeleteDialogTarget] = useState<{ type: 'post' | 'reply'; id: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Reply Composer
   const [replyBody, setReplyBody] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(false);
@@ -111,6 +117,45 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
       fetchDoubtDetails();
     }
   }, [open, doubtId]);
+
+  const handleConfirmDelete = async () => {
+    if (!deleteDialogTarget) return;
+    setIsDeleting(true);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      if (deleteDialogTarget.type === 'post') {
+        const res = await fetch(`${API_BASE_URL}/doubts/${deleteDialogTarget.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          setDeleteDialogTarget(null);
+          onPostUpdated();
+          onClose();
+        } else {
+          const data = await res.json();
+          setError(data.error || 'Failed to delete question');
+        }
+      } else {
+        const res = await fetch(`${API_BASE_URL}/doubts/replies/${deleteDialogTarget.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          setDeleteDialogTarget(null);
+          fetchDoubtDetails();
+          onPostUpdated();
+        } else {
+          const data = await res.json();
+          setError(data.error || 'Failed to delete reply');
+        }
+      }
+    } catch {
+      setError('Network error while deleting');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchDoubtDetails = async () => {
     setLoading(true);
@@ -276,7 +321,8 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <>
+      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}`, p: 2 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Typography variant="h6" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
@@ -408,6 +454,20 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                       sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
                     >
                       Reveal Real Name
+                    </Button>
+                  )}
+
+                  {/* Delete Post Button (Author or Teacher) */}
+                  {(post.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      startIcon={<DeleteOutlineIcon />}
+                      onClick={() => setDeleteDialogTarget({ type: 'post', id: post.id })}
+                      sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                    >
+                      Delete Question
                     </Button>
                   )}
 
@@ -580,6 +640,20 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                               {reply.helpful_count}
                             </Typography>
                           </IconButton>
+
+                          {/* Delete Reply Button (Author or Teacher) */}
+                          {(reply.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                            <Tooltip title="Delete this reply">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => setDeleteDialogTarget({ type: 'reply', id: reply.id })}
+                                sx={{ ml: 0.5 }}
+                              >
+                                <DeleteOutlineIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </Stack>
                     </Paper>
@@ -652,5 +726,43 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
         </Button>
       </DialogActions>
     </Dialog>
+
+    {/* Delete Confirmation Dialog */}
+    <Dialog
+      open={Boolean(deleteDialogTarget)}
+      onClose={() => !isDeleting && setDeleteDialogTarget(null)}
+      maxWidth="xs"
+      fullWidth
+    >
+      <DialogTitle sx={{ fontWeight: 800 }}>
+        {deleteDialogTarget?.type === 'post' ? 'Delete Question?' : 'Delete Reply?'}
+      </DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+          {deleteDialogTarget?.type === 'post'
+            ? 'Are you sure you want to permanently delete this question and all of its replies? This action cannot be undone.'
+            : 'Are you sure you want to permanently delete this reply? This action cannot be undone.'}
+        </Typography>
+      </DialogContent>
+      <DialogActions sx={{ p: 2 }}>
+        <Button
+          onClick={() => setDeleteDialogTarget(null)}
+          disabled={isDeleting}
+          sx={{ textTransform: 'none', fontWeight: 600 }}
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleConfirmDelete}
+          variant="contained"
+          color="error"
+          disabled={isDeleting}
+          sx={{ textTransform: 'none', fontWeight: 700 }}
+        >
+          {isDeleting ? 'Deleting...' : 'Delete'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </>
   );
 };

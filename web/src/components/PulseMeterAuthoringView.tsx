@@ -14,6 +14,10 @@ import {
   CircularProgress,
   Divider,
   Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -22,6 +26,7 @@ import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import LinearScaleIcon from '@mui/icons-material/LinearScale';
 import SpeedIcon from '@mui/icons-material/Speed';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { CreatePulseMeterDialog } from './CreatePulseMeterDialog';
 import { LivePulseMeterModal, PulseMeterInfo } from './LivePulseMeterModal';
 import { m3Tokens } from '@/theme/tokens';
@@ -55,11 +60,37 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
   const [activeActivityId, setActiveActivityId] = useState<string | null>(null);
   const [activePulsemeter, setActivePulsemeter] = useState<PulseMeterInfo | null>(null);
 
+  // Delete State
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   useEffect(() => {
     if (classroomId) {
       fetchPulsemeters();
     }
   }, [classroomId]);
+
+  const handleDeletePulseMeter = async (id: string) => {
+    setDeleting(true);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/pulsemeters/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setDeleteConfirmId(null);
+        fetchPulsemeters();
+      } else {
+        const data = await res.json();
+        setError(data.error || 'Failed to delete PulseMeter');
+      }
+    } catch {
+      setError('Network error deleting PulseMeter');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleLaunchPulseMeter = async (pm: PulseMeter) => {
     setLaunchingId(pm.id);
@@ -328,23 +359,67 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
                 </Box>
 
                 <Box sx={{ pt: 1.5, borderTop: `1px solid ${m3Tokens.color.surfaceVariant}` }}>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={launchingId === pm.id ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
-                    onClick={() => handleLaunchPulseMeter(pm)}
-                    disabled={launchingId !== null}
-                    fullWidth
-                    sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
-                  >
-                    {launchingId === pm.id ? 'Launching...' : 'Launch Live Activity'}
-                  </Button>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      startIcon={launchingId === pm.id ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
+                      onClick={() => handleLaunchPulseMeter(pm)}
+                      disabled={launchingId !== null}
+                      fullWidth
+                      sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
+                    >
+                      {launchingId === pm.id ? 'Launching...' : 'Launch Live Activity'}
+                    </Button>
+                    <Tooltip title="Delete PulseMeter">
+                      <IconButton
+                        color="error"
+                        onClick={() => setDeleteConfirmId(pm.id)}
+                        sx={{
+                          border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                          borderRadius: '8px',
+                          p: 1,
+                        }}
+                      >
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
                 </Box>
               </Paper>
             </Grid>
           ))}
         </Grid>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={Boolean(deleteConfirmId)}
+        onClose={() => !deleting && setDeleteConfirmId(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Delete PulseMeter?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            Are you sure you want to delete this PulseMeter activity? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDeleteConfirmId(null)} disabled={deleting} sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => deleteConfirmId && handleDeletePulseMeter(deleteConfirmId)}
+            variant="contained"
+            color="error"
+            disabled={deleting}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Create Dialog */}
       <CreatePulseMeterDialog

@@ -240,4 +240,39 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
   }
 });
 
+/**
+ * DELETE /pulsemeters/:id
+ * Role: Teacher
+ * Delete an authored PulseMeter.
+ */
+router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const pulseMeterId = req.params.id;
+
+    const pmCheck = await db.query(
+      `SELECT p.id, c.teacher_id 
+       FROM pulsemeters p 
+       JOIN classrooms c ON p.classroom_id = c.id 
+       WHERE p.id = $1`,
+      [pulseMeterId]
+    );
+
+    if (pmCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'PulseMeter not found.' });
+    }
+
+    if (pmCheck.rows[0].teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'You do not have permission to delete this PulseMeter.' });
+    }
+
+    await db.query('DELETE FROM pulsemeters WHERE id = $1', [pulseMeterId]);
+
+    res.json({ message: 'PulseMeter deleted successfully.' });
+  } catch (err) {
+    console.error('[ClassPulse PulseMeter] Error deleting PulseMeter:', err);
+    res.status(500).json({ error: 'Failed to delete PulseMeter.' });
+  }
+});
+
 module.exports = router;
+

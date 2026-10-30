@@ -14,8 +14,8 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (email: string, password: string, full_name: string, role: 'teacher' | 'student') => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean; error?: string }>;
+  signup: (email: string, password: string, full_name: string, role: 'teacher' | 'student', rememberMe?: boolean) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -29,8 +29,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('classpulse_token');
-    const storedUser = localStorage.getItem('classpulse_user');
+    // Check persistent storage first, then fall back to session storage
+    const storedToken = localStorage.getItem('classpulse_token') || sessionStorage.getItem('classpulse_token');
+    const storedUser = localStorage.getItem('classpulse_user') || sessionStorage.getItem('classpulse_user');
 
     if (storedToken && storedUser) {
       setToken(storedToken);
@@ -39,12 +40,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch {
         localStorage.removeItem('classpulse_token');
         localStorage.removeItem('classpulse_user');
+        sessionStorage.removeItem('classpulse_token');
+        sessionStorage.removeItem('classpulse_user');
       }
     }
     setLoading(false);
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, rememberMe: boolean = true) => {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
@@ -59,8 +62,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setToken(data.token);
       setUser(data.user);
-      localStorage.setItem('classpulse_token', data.token);
-      localStorage.setItem('classpulse_user', JSON.stringify(data.user));
+
+      if (rememberMe) {
+        localStorage.setItem('classpulse_token', data.token);
+        localStorage.setItem('classpulse_user', JSON.stringify(data.user));
+        sessionStorage.removeItem('classpulse_token');
+        sessionStorage.removeItem('classpulse_user');
+      } else {
+        sessionStorage.setItem('classpulse_token', data.token);
+        sessionStorage.setItem('classpulse_user', JSON.stringify(data.user));
+        localStorage.removeItem('classpulse_token');
+        localStorage.removeItem('classpulse_user');
+      }
+
       return { success: true };
     } catch {
       return { success: false, error: 'Network error connecting to backend server' };
@@ -71,7 +85,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: string,
     password: string,
     full_name: string,
-    role: 'teacher' | 'student'
+    role: 'teacher' | 'student',
+    rememberMe: boolean = true
   ) => {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/signup`, {
@@ -87,8 +102,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setToken(data.token);
       setUser(data.user);
-      localStorage.setItem('classpulse_token', data.token);
-      localStorage.setItem('classpulse_user', JSON.stringify(data.user));
+
+      if (rememberMe) {
+        localStorage.setItem('classpulse_token', data.token);
+        localStorage.setItem('classpulse_user', JSON.stringify(data.user));
+        sessionStorage.removeItem('classpulse_token');
+        sessionStorage.removeItem('classpulse_user');
+      } else {
+        sessionStorage.setItem('classpulse_token', data.token);
+        sessionStorage.setItem('classpulse_user', JSON.stringify(data.user));
+        localStorage.removeItem('classpulse_token');
+        localStorage.removeItem('classpulse_user');
+      }
+
       return { success: true };
     } catch {
       return { success: false, error: 'Network error connecting to backend server' };
@@ -100,6 +126,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     localStorage.removeItem('classpulse_token');
     localStorage.removeItem('classpulse_user');
+    sessionStorage.removeItem('classpulse_token');
+    sessionStorage.removeItem('classpulse_user');
   };
 
   return (

@@ -304,5 +304,40 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
   }
 });
 
+/**
+ * DELETE /quizzes/:id
+ * Role: Teacher
+ * Delete an authored Quiz and its questions.
+ */
+router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const quizId = req.params.id;
+
+    const quizCheck = await db.query(
+      `SELECT q.id, c.teacher_id 
+       FROM quizzes q 
+       JOIN classrooms c ON q.classroom_id = c.id 
+       WHERE q.id = $1`,
+      [quizId]
+    );
+
+    if (quizCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Quiz not found.' });
+    }
+
+    if (quizCheck.rows[0].teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'You do not have permission to delete this Quiz.' });
+    }
+
+    await db.query('DELETE FROM quizzes WHERE id = $1', [quizId]);
+
+    res.json({ message: 'Quiz deleted successfully.' });
+  } catch (err) {
+    console.error('[ClassPulse Quiz] Error deleting Quiz:', err);
+    res.status(500).json({ error: 'Failed to delete Quiz.' });
+  }
+});
+
 module.exports = router;
+
 

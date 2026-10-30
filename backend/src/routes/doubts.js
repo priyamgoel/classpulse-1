@@ -507,4 +507,193 @@ router.post('/replies/:id/endorse', authenticateToken, requireRole('teacher'), a
   }
 });
 
+/**
+ * DELETE /doubts/:id
+ * Delete a doubt post (author or teacher).
+ */
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const postId = req.params.id;
+
+    const checkRes = await db.query('SELECT author_id FROM doubt_posts WHERE id = $1', [postId]);
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Doubt post not found' });
+    }
+
+    const isAuthor = checkRes.rows[0].author_id === req.user.id;
+    const isTeacher = req.user.role === 'teacher';
+
+    if (!isAuthor && !isTeacher) {
+      return res.status(403).json({ error: 'You do not have permission to delete this doubt post' });
+    }
+
+    // Clean up auxiliary marks & flags
+    await db.query(
+      `DELETE FROM doubt_helpful_marks 
+       WHERE (target_type = 'POST' AND target_id = $1)
+          OR (target_type = 'REPLY' AND target_id IN (SELECT id FROM doubt_replies WHERE doubt_post_id = $1))`,
+      [postId]
+    );
+
+    await db.query(
+      `DELETE FROM doubt_moderation_flags 
+       WHERE (target_type = 'POST' AND target_id = $1)
+          OR (target_type = 'REPLY' AND target_id IN (SELECT id FROM doubt_replies WHERE doubt_post_id = $1))`,
+      [postId]
+    );
+
+    // Delete post (cascades to replies)
+    await db.query('DELETE FROM doubt_posts WHERE id = $1', [postId]);
+
+    res.json({ message: 'Doubt post deleted successfully' });
+  } catch (err) {
+    console.error('[ClassPulse Doubts] Error deleting doubt post:', err);
+    res.status(500).json({ error: 'Failed to delete doubt post' });
+  }
+});
+
+/**
+ * DELETE /doubts/replies/:id
+ * Delete a doubt reply (reply author or teacher).
+ */
+router.delete('/replies/:id', authenticateToken, async (req, res) => {
+  try {
+    const replyId = req.params.id;
+
+    const checkRes = await db.query(
+      'SELECT id, doubt_post_id, author_id, is_solution FROM doubt_replies WHERE id = $1',
+      [replyId]
+    );
+
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Reply not found' });
+    }
+
+    const reply = checkRes.rows[0];
+    const isAuthor = reply.author_id === req.user.id;
+    const isTeacher = req.user.role === 'teacher';
+
+    if (!isAuthor && !isTeacher) {
+      return res.status(403).json({ error: 'You do not have permission to delete this reply' });
+    }
+
+    // Clean up helpful marks and flags for this reply
+    await db.query("DELETE FROM doubt_helpful_marks WHERE target_type = 'REPLY' AND target_id = $1", [replyId]);
+    await db.query("DELETE FROM doubt_moderation_flags WHERE target_type = 'REPLY' AND target_id = $1", [replyId]);
+
+    // Delete the reply
+    await db.query('DELETE FROM doubt_replies WHERE id = $1', [replyId]);
+
+    // If the reply was marked as solution, check if any other solution remains
+    if (reply.is_solution) {
+      const remainingSolutions = await db.query(
+        'SELECT id FROM doubt_replies WHERE doubt_post_id = $1 AND is_solution = TRUE',
+        [reply.doubt_post_id]
+      );
+      if (remainingSolutions.rows.length === 0) {
+        await db.query("UPDATE doubt_posts SET status = 'OPEN' WHERE id = $1", [reply.doubt_post_id]);
+      }
+    }
+
+    res.json({ message: 'Reply deleted successfully' });
+  } catch (err) {
+    console.error('[ClassPulse Doubts] Error deleting reply:', err);
+    res.status(500).json({ error: 'Failed to delete reply' });
+  }
+});
+
+/**
+ * PUT /doubts/:id
+ * Edit an existing doubt post title or body (author or teacher).
+ */
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const { title, body } = req.body;
+
+    const checkRes = await db.query('SELECT author_id FROM doubt_posts WHERE id = $1', [postId]);
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Doubt post not found' });
+    }
+
+    const isAuthor = checkRes.rows[0].author_id === req.user.id;
+    const isTeacher = req.user.role === 'teacher';
+
+    if (!isAuthor && !isTeacher) {
+      return res.status(403).json({ error: 'You do not have permission to edit this doubt post' });
+    }
+
+    if (!title && !body) {
+      return res.status(400).json({ error: 'At least title or body is required to update' });
+    }
+
+    let updateFields = [];
+    let params = [postId];
+    let idx = 2;
+
+    if (title && title.trim()) {
+      updateFields.push(`title = $${idx}`);
+      params.push(title.trim());
+      idx++;
+    }
+
+    if (body && body.trim()) {
+      updateFields.push(`body = $${idx}`);
+      params.push(body.trim());
+      idx++;
+    }
+
+    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+
+    const updateRes = await db.query(
+      `UPDATE doubt_posts SET ${updateFields.join(', ')} WHERE id = $1 RETURNING *`,
+      params
+    );
+
+    res.json({ message: 'Doubt post updated successfully', post: updateRes.rows[0] });
+  } catch (err) {
+    console.error('[ClassPulse Doubts] Error updating doubt post:', err);
+    res.status(500).json({ error: 'Failed to update doubt post' });
+  }
+});
+
+/**
+ * PUT /doubts/replies/:id
+ * Edit an existing reply body (author or teacher).
+ */
+router.put('/replies/:id', authenticateToken, async (req, res) => {
+  try {
+    const replyId = req.params.id;
+    const { body } = req.body;
+
+    if (!body || !body.trim()) {
+      return res.status(400).json({ error: 'Reply body cannot be empty' });
+    }
+
+    const checkRes = await db.query('SELECT author_id FROM doubt_replies WHERE id = $1', [replyId]);
+    if (checkRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Reply not found' });
+    }
+
+    const isAuthor = checkRes.rows[0].author_id === req.user.id;
+    const isTeacher = req.user.role === 'teacher';
+
+    if (!isAuthor && !isTeacher) {
+      return res.status(403).json({ error: 'You do not have permission to edit this reply' });
+    }
+
+    const updateRes = await db.query(
+      'UPDATE doubt_replies SET body = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      [body.trim(), replyId]
+    );
+
+    res.json({ message: 'Reply updated successfully', reply: updateRes.rows[0] });
+  } catch (err) {
+    console.error('[ClassPulse Doubts] Error updating reply:', err);
+    res.status(500).json({ error: 'Failed to update reply' });
+  }
+});
+
 module.exports = router;
+
+

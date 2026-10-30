@@ -13,20 +13,29 @@ import 'widgets/classroom_card.dart';
 import 'widgets/empty_state.dart';
 import 'widgets/join_classroom_dialog.dart';
 
-void main() {
-  runApp(const ClassPulseApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final isLoggedIn = await AuthService.init();
+  runApp(ClassPulseApp(initialAuthenticated: isLoggedIn));
 }
 
 class ClassPulseApp extends StatefulWidget {
-  const ClassPulseApp({super.key});
+  final bool initialAuthenticated;
+  const ClassPulseApp({super.key, this.initialAuthenticated = false});
 
   @override
   State<ClassPulseApp> createState() => _ClassPulseAppState();
 }
 
 class _ClassPulseAppState extends State<ClassPulseApp> {
-  bool _isAuthenticated = false;
+  late bool _isAuthenticated;
   bool _showSignup = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _isAuthenticated = widget.initialAuthenticated;
+  }
 
   void _onAuthenticated() {
     setState(() {
@@ -34,8 +43,8 @@ class _ClassPulseAppState extends State<ClassPulseApp> {
     });
   }
 
-  void _onLogout() {
-    AuthService.logout();
+  Future<void> _onLogout() async {
+    await AuthService.logout();
     setState(() {
       _isAuthenticated = false;
       _showSignup = false;
