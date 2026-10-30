@@ -343,6 +343,44 @@ router.get('/:id/roster', authenticateToken, requireRole('teacher'), async (req,
   }
 });
 
+// DELETE /classrooms/:id/roster/:student_id — Teacher removes/unenrolls a student from their section
+router.delete('/:id/roster/:student_id', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const { id: classroomId, student_id: studentId } = req.params;
+
+    // Verify teacher owns this classroom
+    const classCheck = await db.query('SELECT teacher_id FROM classrooms WHERE id = $1', [classroomId]);
+    if (classCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Classroom not found' });
+    }
+
+    if (classCheck.rows[0].teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: You do not teach this classroom' });
+    }
+
+    // Verify student is enrolled
+    const enrollCheck = await db.query(
+      'SELECT id FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      [classroomId, studentId]
+    );
+
+    if (enrollCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Student is not enrolled in this classroom' });
+    }
+
+    // Remove enrollment
+    await db.query(
+      'DELETE FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      [classroomId, studentId]
+    );
+
+    res.json({ message: 'Student removed from classroom roster successfully' });
+  } catch (err) {
+    console.error('Error removing student from roster:', err);
+    res.status(500).json({ error: 'Failed to remove student from roster' });
+  }
+});
+
 // DELETE /classrooms/:id — Teacher permanently deletes a classroom and all related data
 router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res) => {
   const client = await db.pool.connect();

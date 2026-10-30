@@ -135,6 +135,31 @@ router.post('/:id/end', authenticateToken, requireRole('teacher'), async (req, r
   }
 });
 
+// GET /sessions/active-mine — Fetch any active (unended) session for the authenticated teacher
+router.get('/active-mine', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT s.*, c.section_name, co.course_code, co.course_name
+       FROM sessions s
+       JOIN classrooms c ON s.classroom_id = c.id
+       JOIN courses co ON c.course_id = co.id
+       WHERE c.teacher_id = $1 AND s.ended_at IS NULL
+       ORDER BY s.started_at DESC
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ session: null });
+    }
+
+    res.json({ session: result.rows[0] });
+  } catch (err) {
+    console.error('Error fetching active teacher session:', err);
+    res.status(500).json({ error: 'Failed to fetch active session' });
+  }
+});
+
 // GET /sessions/:id — Retrieve session details & status
 router.get('/:id', authenticateToken, async (req, res) => {
   try {

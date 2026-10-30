@@ -35,6 +35,7 @@ import SchoolIcon from '@mui/icons-material/School';
 import PublicIcon from '@mui/icons-material/Public';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { useAuth } from '@/context/AuthContext';
 import { m3Tokens } from '@/theme/tokens';
 
@@ -107,10 +108,104 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   const [deleteDialogTarget, setDeleteDialogTarget] = useState<{ type: 'post' | 'reply'; id: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Edit Question State
+  const [editingPostOpen, setEditingPostOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [isSavingPost, setIsSavingPost] = useState(false);
+
+  // Edit Reply State
+  const [editingReply, setEditingReply] = useState<DoubtReply | null>(null);
+  const [editReplyBody, setEditReplyBody] = useState('');
+  const [isSavingReply, setIsSavingReply] = useState(false);
+
   // Reply Composer
   const [replyBody, setReplyBody] = useState('');
   const [replyAnonymous, setReplyAnonymous] = useState(false);
   const [submittingReply, setSubmittingReply] = useState(false);
+
+  const handleOpenEditPost = () => {
+    if (!post) return;
+    setEditTitle(post.title);
+    setEditBody(post.body);
+    setEditingPostOpen(true);
+  };
+
+  const handleSaveEditPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!post || !editTitle.trim() || !editBody.trim()) return;
+    setIsSavingPost(true);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/doubts/${post.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          body: editBody.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPost({
+          ...post,
+          title: editTitle.trim(),
+          body: editBody.trim(),
+        });
+        setEditingPostOpen(false);
+        onPostUpdated();
+      } else {
+        setError(data.error || 'Failed to update question');
+      }
+    } catch {
+      setError('Network error updating question');
+    } finally {
+      setIsSavingPost(false);
+    }
+  };
+
+  const handleOpenEditReply = (reply: DoubtReply) => {
+    setEditingReply(reply);
+    setEditReplyBody(reply.body);
+  };
+
+  const handleSaveEditReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingReply || !editReplyBody.trim()) return;
+    setIsSavingReply(true);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/doubts/replies/${editingReply.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          body: editReplyBody.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReplies((prev) =>
+          prev.map((r) =>
+            r.id === editingReply.id ? { ...r, body: editReplyBody.trim() } : r
+          )
+        );
+        setEditingReply(null);
+        onPostUpdated();
+      } else {
+        setError(data.error || 'Failed to update reply');
+      }
+    } catch {
+      setError('Network error updating reply');
+    } finally {
+      setIsSavingReply(false);
+    }
+  };
 
   useEffect(() => {
     if (open && doubtId) {
@@ -457,6 +552,20 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                     </Button>
                   )}
 
+                  {/* Edit Post Button (Author or Teacher) */}
+                  {(post.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="inherit"
+                      startIcon={<EditOutlinedIcon />}
+                      onClick={handleOpenEditPost}
+                      sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                    >
+                      Edit
+                    </Button>
+                  )}
+
                   {/* Delete Post Button (Author or Teacher) */}
                   {(post.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
                     <Button
@@ -467,7 +576,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                       onClick={() => setDeleteDialogTarget({ type: 'post', id: post.id })}
                       sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
                     >
-                      Delete Question
+                      Delete
                     </Button>
                   )}
 
@@ -641,6 +750,20 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                             </Typography>
                           </IconButton>
 
+                          {/* Edit Reply Button (Author or Teacher) */}
+                          {(reply.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                            <Tooltip title="Edit this reply">
+                              <IconButton
+                                size="small"
+                                color="inherit"
+                                onClick={() => handleOpenEditReply(reply)}
+                                sx={{ ml: 0.5 }}
+                              >
+                                <EditOutlinedIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+
                           {/* Delete Reply Button (Author or Teacher) */}
                           {(reply.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
                             <Tooltip title="Delete this reply">
@@ -762,6 +885,97 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
           {isDeleting ? 'Deleting...' : 'Delete'}
         </Button>
       </DialogActions>
+    </Dialog>
+
+    {/* Edit Question Dialog */}
+    <Dialog
+      open={editingPostOpen}
+      onClose={() => !isSavingPost && setEditingPostOpen(false)}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle sx={{ fontWeight: 800 }}>Edit Question</DialogTitle>
+      <form onSubmit={handleSaveEditPost}>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <TextField
+              label="Question Title"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Question Details / Description"
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+              fullWidth
+              multiline
+              rows={4}
+              required
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={() => setEditingPostOpen(false)}
+            disabled={isSavingPost}
+            sx={{ textTransform: 'none', fontWeight: 600 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            disabled={isSavingPost || !editTitle.trim() || !editBody.trim()}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            {isSavingPost ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+
+    {/* Edit Reply Dialog */}
+    <Dialog
+      open={Boolean(editingReply)}
+      onClose={() => !isSavingReply && setEditingReply(null)}
+      maxWidth="sm"
+      fullWidth
+    >
+      <DialogTitle sx={{ fontWeight: 800 }}>Edit Answer / Reply</DialogTitle>
+      <form onSubmit={handleSaveEditReply}>
+        <DialogContent dividers>
+          <TextField
+            label="Your Answer / Solution"
+            value={editReplyBody}
+            onChange={(e) => setEditReplyBody(e.target.value)}
+            fullWidth
+            multiline
+            rows={4}
+            required
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={() => setEditingReply(null)}
+            disabled={isSavingReply}
+            sx={{ textTransform: 'none', fontWeight: 600 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            disabled={isSavingReply || !editReplyBody.trim()}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            {isSavingReply ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </form>
     </Dialog>
     </>
   );

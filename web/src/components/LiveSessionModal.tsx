@@ -33,6 +33,8 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import SecurityIcon from '@mui/icons-material/Security';
 import SpeedIcon from '@mui/icons-material/Speed';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens } from '@/theme/tokens';
@@ -96,10 +98,35 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [rotationSpeedMs, setRotationSpeedMs] = useState<number>(800); // 800ms (Default), 300ms (Fast), 100ms (Ultra-Fast)
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const rotationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Live session elapsed timer
+  useEffect(() => {
+    if (!open || !session?.started_at) return;
+    const startTime = new Date(session.started_at).getTime();
+    const updateElapsed = () => {
+      const now = Date.now();
+      setElapsedSeconds(Math.max(0, Math.floor((now - startTime) / 1000)));
+    };
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [open, session?.started_at]);
+
+  const formatElapsed = (totalSec: number) => {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleRequestClose = () => {
+    setConfirmCloseOpen(true);
+  };
 
   // 1. Initialize Socket.io & Fetch Existing Roster
   useEffect(() => {
@@ -486,6 +513,25 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               </Button>
             </Stack>
 
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent="center" sx={{ mb: 1.5 }}>
+              <Chip
+                icon={<AccessTimeIcon sx={{ fontSize: '0.85rem !important' }} />}
+                label={`Elapsed: ${formatElapsed(elapsedSeconds)}`}
+                size="small"
+                color={elapsedSeconds >= 600 ? "warning" : "default"}
+                sx={{ fontWeight: 700, fontSize: '0.75rem' }}
+              />
+              {elapsedSeconds >= 600 && (
+                <Chip
+                  icon={<WarningAmberIcon sx={{ fontSize: '0.85rem !important' }} />}
+                  label="10+ min active"
+                  size="small"
+                  color="warning"
+                  sx={{ fontWeight: 800, fontSize: '0.7rem' }}
+                />
+              )}
+            </Stack>
+
             <Paper
               elevation={0}
               sx={{
@@ -583,43 +629,66 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   // Standard Modal View (With 1-Click Fullscreen Button & Speed Toggle)
   // -------------------------------------------------------------
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle sx={{ p: 2.5, bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Box>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Chip label="LIVE ATTENDANCE STREAM" color="error" size="small" sx={{ fontWeight: 800, fontSize: '0.7rem' }} />
-              <Typography variant="h6" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
-                {session.course_code}: {session.course_name}
+    <>
+      <Dialog open={open} onClose={handleRequestClose} maxWidth="lg" fullWidth>
+        <DialogTitle sx={{ p: 2.5, bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip label="LIVE ATTENDANCE STREAM" color="error" size="small" sx={{ fontWeight: 800, fontSize: '0.7rem' }} />
+                <Chip
+                  icon={<AccessTimeIcon sx={{ fontSize: '0.85rem !important' }} />}
+                  label={`Elapsed: ${formatElapsed(elapsedSeconds)}`}
+                  size="small"
+                  color={elapsedSeconds >= 600 ? "warning" : "default"}
+                  sx={{ fontWeight: 700, fontSize: '0.75rem' }}
+                />
+                {elapsedSeconds >= 600 && (
+                  <Chip
+                    icon={<WarningAmberIcon sx={{ fontSize: '0.85rem !important' }} />}
+                    label="10+ min: Remember to end"
+                    size="small"
+                    color="warning"
+                    sx={{ fontWeight: 800, fontSize: '0.7rem' }}
+                  />
+                )}
+                <Typography variant="h6" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                  {session.course_code}: {session.course_name}
+                </Typography>
+              </Stack>
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 0.5 }}>
+                Section: <strong>{session.section_name}</strong> • Started at {new Date(session.started_at).toLocaleTimeString()}
               </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<FullscreenIcon />}
+                onClick={toggleFullscreen}
+                sx={{ fontWeight: 700 }}
+              >
+                Fullscreen Projector
+              </Button>
+              <IconButton onClick={handleRequestClose} size="small" title="Close Projector">
+                <CloseIcon />
+              </IconButton>
             </Stack>
-            <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 0.5 }}>
-              Section: <strong>{session.section_name}</strong> • Started at {new Date(session.started_at).toLocaleTimeString()}
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<FullscreenIcon />}
-              onClick={toggleFullscreen}
-              sx={{ fontWeight: 700 }}
-            >
-              Fullscreen Projector
-            </Button>
-            <IconButton onClick={onClose} size="small">
-              <CloseIcon />
-            </IconButton>
           </Stack>
-        </Stack>
-      </DialogTitle>
+        </DialogTitle>
 
-      <DialogContent sx={{ p: 3, bgcolor: m3Tokens.color.background }}>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
+        <DialogContent sx={{ p: 3, bgcolor: m3Tokens.color.background }}>
+          {elapsedSeconds >= 600 && (
+            <Alert severity="warning" icon={<WarningAmberIcon />} sx={{ mb: 2, borderRadius: '10px' }}>
+              <strong>Notice:</strong> This attendance session has been running for over 10 minutes ({formatElapsed(elapsedSeconds)}). Please remember to click <strong>End Attendance Session</strong> once all students in the classroom have finished scanning.
+            </Alert>
+          )}
+
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
 
         <Grid container spacing={3}>
           {/* Left Panel: Rotating 3-QR Stream Projector */}
@@ -811,12 +880,18 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
       </DialogContent>
 
       <DialogActions sx={{ p: 2.5, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}`, justifyContent: 'space-between' }}>
-        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-          Total Attendance Marked: <strong>{attendees.length} students</strong>
-        </Typography>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            Total Present: <strong>{attendees.length} students</strong>
+          </Typography>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.outlineVariant }}>•</Typography>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            Elapsed: <strong>{formatElapsed(elapsedSeconds)}</strong>
+          </Typography>
+        </Stack>
         <Stack direction="row" spacing={2}>
-          <Button onClick={onClose} variant="outlined">
-            Hide Projector (Session Still Active)
+          <Button onClick={handleRequestClose} variant="outlined">
+            Keep Running in Background
           </Button>
           <Button
             onClick={handleEndSession}
@@ -829,5 +904,59 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         </Stack>
       </DialogActions>
     </Dialog>
+
+    {/* Confirmation Dialog on Projector Close */}
+    <Dialog
+      open={confirmCloseOpen}
+      onClose={() => setConfirmCloseOpen(false)}
+      maxWidth="xs"
+      fullWidth
+    >
+      <DialogTitle sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
+        Keep Attendance Running?
+      </DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 1.5 }}>
+          Closing the projector does <strong>not</strong> end the attendance session. QR codes will continue cycling and students can still scan in the background.
+        </Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurface }}>
+          If attendance in the lecture hall is complete, please end the session now so attendance counts are finalized.
+        </Typography>
+      </DialogContent>
+      <DialogActions sx={{ p: 2.5, flexDirection: 'column', gap: 1 }}>
+        <Button
+          fullWidth
+          variant="contained"
+          color="error"
+          onClick={async () => {
+            setConfirmCloseOpen(false);
+            await handleEndSession();
+          }}
+          disabled={ending}
+          sx={{ fontWeight: 700 }}
+        >
+          {ending ? 'Ending...' : 'End Attendance Session Now'}
+        </Button>
+        <Button
+          fullWidth
+          variant="outlined"
+          onClick={() => {
+            setConfirmCloseOpen(false);
+            onClose();
+          }}
+        >
+          Keep Running in Background
+        </Button>
+        <Button
+          fullWidth
+          size="small"
+          color="inherit"
+          onClick={() => setConfirmCloseOpen(false)}
+        >
+          Cancel
+        </Button>
+      </DialogActions>
+    </Dialog>
+  </>
   );
 };

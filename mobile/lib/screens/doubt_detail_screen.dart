@@ -167,6 +167,154 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
     }
   }
 
+  Future<void> _editPost() async {
+    if (_post == null) return;
+    final titleCtrl = TextEditingController(text: _post!['title'] ?? '');
+    final bodyCtrl = TextEditingController(text: _post!['body'] ?? '');
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Question', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Title',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: bodyCtrl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (updated != true) return;
+
+    try {
+      final token = AuthService.token;
+      final res = await http.put(
+        Uri.parse('${AuthService.baseUrl}/doubts/${_post!['id']}'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'title': titleCtrl.text.trim(),
+          'body': bodyCtrl.text.trim(),
+        }),
+      );
+
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.green,
+            content: Text('Question updated successfully'),
+          ),
+        );
+        _fetchDoubtDetails();
+      } else {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['error'] ?? 'Failed to update question'),
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _editReply(String replyId, String currentBody) async {
+    final bodyCtrl = TextEditingController(text: currentBody);
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Answer', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: bodyCtrl,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Answer',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (updated != true) return;
+
+    try {
+      final token = AuthService.token;
+      final res = await http.put(
+        Uri.parse('${AuthService.baseUrl}/doubts/replies/$replyId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'body': bodyCtrl.text.trim(),
+        }),
+      );
+
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.green,
+            content: Text('Answer updated successfully'),
+          ),
+        );
+        _fetchDoubtDetails();
+      } else {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['error'] ?? 'Failed to update answer'),
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
   Future<void> _deletePost() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -275,7 +423,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canDeletePost = _post != null &&
+    final canManagePost = _post != null &&
         (_post!['author_id'] == AuthService.currentUser?.id ||
             AuthService.currentUser?.role == 'teacher');
 
@@ -284,12 +432,18 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
       appBar: AppBar(
         title: const Text('Discussion Thread', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         actions: [
-          if (canDeletePost)
+          if (canManagePost) ...[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit Question',
+              onPressed: _editPost,
+            ),
             IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.red),
               tooltip: 'Delete Question',
               onPressed: _deletePost,
             ),
+          ],
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _fetchDoubtDetails,
@@ -562,6 +716,18 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                     ),
                   ),
                   if (canDeleteReply) ...[
+                    const SizedBox(width: 10),
+                    InkWell(
+                      onTap: () => _editReply(r['id'], r['body'] ?? ''),
+                      child: const Tooltip(
+                        message: 'Edit Answer',
+                        child: Icon(
+                          Icons.edit_outlined,
+                          size: 16,
+                          color: M3Tokens.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 10),
                     InkWell(
                       onTap: () => _deleteReply(r['id']),

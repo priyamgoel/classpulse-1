@@ -90,17 +90,56 @@ export default function HomePage() {
   const [deleteConfirmClassroom, setDeleteConfirmClassroom] = useState<Classroom | null>(null);
   const [activeLiveSession, setActiveLiveSession] = useState<LiveSession | null>(null);
   const [liveSessionModalOpen, setLiveSessionModalOpen] = useState(false);
+  const [sessionElapsed, setSessionElapsed] = useState('');
 
   const { user, loading, logout } = useAuth();
   const router = useRouter();
+
+  // Elapsed timer ticker for active attendance session
+  useEffect(() => {
+    if (!activeLiveSession?.started_at) {
+      setSessionElapsed('');
+      return;
+    }
+    const update = () => {
+      const diff = Math.max(0, Math.floor((Date.now() - new Date(activeLiveSession.started_at).getTime()) / 1000));
+      const m = Math.floor(diff / 60);
+      const s = diff % 60;
+      setSessionElapsed(`${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [activeLiveSession]);
 
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login');
     } else if (user) {
       fetchClassrooms();
+      checkActiveSession();
     }
   }, [user, loading, router]);
+
+  const checkActiveSession = async () => {
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      if (!token) return;
+      const res = await fetch(`${API_BASE_URL}/sessions/active-mine`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          setActiveLiveSession(data.session);
+        } else {
+          setActiveLiveSession(null);
+        }
+      }
+    } catch (err) {
+      console.error('Error checking active session:', err);
+    }
+  };
 
   const fetchClassrooms = async () => {
     setLoadingClassrooms(true);
@@ -193,18 +232,68 @@ export default function HomePage() {
 
   return (
     <AppShell activeTab={mainNavTab} onTabChange={setMainNavTab}>
-      {/* Session Active Notification Banner */}
+      {/* Session Active Persistent Notification Banner */}
       {activeLiveSession && !liveSessionModalOpen && (
-        <Alert
-          severity="warning"
-          sx={{ mb: 3, alignItems: 'center', borderRadius: '12px' }}
-          action={
-            <Stack direction="row" spacing={1}>
+        <Paper
+          elevation={2}
+          sx={{
+            mb: 3,
+            p: 2,
+            borderRadius: '12px',
+            border: '2px solid #F59E0B',
+            bgcolor: '#FFFBEB',
+            position: 'sticky',
+            top: 72,
+            zIndex: 10,
+          }}
+        >
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            justifyContent="space-between"
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            spacing={2}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  bgcolor: '#EF4444',
+                  boxShadow: '0 0 0 0 rgba(239, 68, 68, 0.7)',
+                  animation: 'pulse 1.5s infinite',
+                  '@keyframes pulse': {
+                    '0%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(239, 68, 68, 0.7)' },
+                    '70%': { transform: 'scale(1)', boxShadow: '0 0 0 8px rgba(239, 68, 68, 0)' },
+                    '100%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(239, 68, 68, 0)' },
+                  },
+                }}
+              />
+              <Box>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#92400E' }}>
+                    ATTENDANCE SESSION ACTIVE
+                  </Typography>
+                  {sessionElapsed && (
+                    <Chip
+                      size="small"
+                      label={`Running for ${sessionElapsed}`}
+                      sx={{ bgcolor: '#FEF3C7', color: '#92400E', fontWeight: 700, fontSize: '0.75rem' }}
+                    />
+                  )}
+                </Stack>
+                <Typography variant="body2" sx={{ color: '#78350F', mt: 0.25 }}>
+                  <strong>{activeLiveSession.course_code}: {activeLiveSession.course_name}</strong> ({activeLiveSession.section_name}) is accepting QR scans in background.
+                </Typography>
+              </Box>
+            </Stack>
+
+            <Stack direction="row" spacing={1.5} sx={{ alignSelf: { xs: 'stretch', sm: 'auto' } }}>
               <Button
                 size="small"
                 variant="outlined"
-                color="warning"
                 onClick={() => setLiveSessionModalOpen(true)}
+                sx={{ borderColor: '#D97706', color: '#92400E', fontWeight: 700 }}
               >
                 Re-open Projector
               </Button>
@@ -222,14 +311,13 @@ export default function HomePage() {
                   setLiveSessionModalOpen(false);
                   fetchClassrooms();
                 }}
+                sx={{ fontWeight: 700 }}
               >
-                End Session
+                End Attendance Session
               </Button>
             </Stack>
-          }
-        >
-          <strong>Live session is active</strong> — {activeLiveSession.course_code}: {activeLiveSession.course_name} ({activeLiveSession.section_name}). Students can still scan. Re-open the projector or end the session.
-        </Alert>
+          </Stack>
+        </Paper>
       )}
 
       {sessionError && (
@@ -756,6 +844,7 @@ export default function HomePage() {
         open={Boolean(rosterDialogClassroom)}
         onClose={() => setRosterDialogClassroom(null)}
         classroom={rosterDialogClassroom}
+        onRosterUpdated={fetchClassrooms}
       />
       <LiveSessionModal
         open={liveSessionModalOpen}
