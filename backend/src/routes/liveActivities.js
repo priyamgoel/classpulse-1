@@ -298,6 +298,40 @@ router.get('/active', authenticateToken, async (req, res) => {
       };
     }
 
+    let userResponse = null;
+    if (req.user && req.user.role === 'student') {
+      if (row.activity_type === 'PULSEMETER') {
+        const pmResp = await db.query(
+          `SELECT response_value FROM pulsemeter_responses WHERE live_activity_id = $1 AND student_id = $2`,
+          [row.id, req.user.id]
+        );
+        userResponse = {
+          has_responded: pmResp.rows.length > 0,
+          response_value: pmResp.rows[0]?.response_value || null,
+        };
+      } else if (row.activity_type === 'QUIZ') {
+        const qResp = await db.query(
+          `SELECT question_id, selected_option_id, is_correct, score_awarded
+           FROM quiz_responses
+           WHERE live_activity_id = $1 AND student_id = $2`,
+          [row.id, req.user.id]
+        );
+        const answeredQuestions = qResp.rows.map((r) => ({
+          question_id: r.question_id,
+          selected_option_id: r.selected_option_id,
+          is_correct: r.is_correct,
+          score_awarded: r.score_awarded,
+        }));
+        const totalScore = qResp.rows.reduce((sum, r) => sum + (r.score_awarded || 0), 0);
+        userResponse = {
+          has_responded: answeredQuestions.length > 0,
+          answered_count: answeredQuestions.length,
+          answered_questions: answeredQuestions,
+          cumulative_score: totalScore,
+        };
+      }
+    }
+
     res.json({
       active: true,
       activity: {
@@ -313,6 +347,7 @@ router.get('/active', authenticateToken, async (req, res) => {
           config: row.pm_config,
         } : null,
         quiz: quizDetails,
+        user_response: userResponse,
       },
     });
   } catch (err) {
@@ -484,6 +519,12 @@ router.post('/:id/quiz/answer', authenticateToken, async (req, res) => {
     let timeLimit = question.time_limit_seconds || 20;
 
     if (timerInfo) {
+      if (timerInfo.revealed) {
+        return res.status(400).json({ error: 'This question is already closed and results have been revealed.' });
+      }
+      if (timerInfo.endTimeMs && nowMs > timerInfo.endTimeMs + 3000) {
+        return res.status(400).json({ error: 'Time limit has expired for this question.' });
+      }
       responseTimeMs = Math.max(0, nowMs - timerInfo.startTimeMs);
       timeLimit = timerInfo.timeLimitSeconds || timeLimit;
     }
@@ -596,6 +637,12 @@ router.post('/:id/quiz/show-results', authenticateToken, requireRole('teacher'),
 
     // Compute cumulative leaderboard
     const leaderboard = await computeQuizLeaderboard(activityId);
+
+    // Mark question as revealed so late submissions are rejected
+    const timerInfo = activeQuestionTimers.get(`${activityId}_${question_id}`);
+    if (timerInfo) {
+      timerInfo.revealed = true;
+    }
 
     // Broadcast question results and leaderboard to classroom
     const io = req.app.get('io');

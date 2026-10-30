@@ -128,7 +128,28 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
       );
 
       if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final isSol = data['is_solution'] == true;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: isSol ? Colors.green : Colors.grey.shade800,
+              content: Text(isSol ? 'Marked as accepted solution!' : 'Solution mark removed'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
         _fetchDoubtDetails();
+      } else {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text(data['error'] ?? 'Failed to update solution status'),
+            ),
+          );
+        }
       }
     } catch (_) {}
   }

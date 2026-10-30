@@ -11,6 +11,8 @@ class LiveQuizStudentScreen extends StatefulWidget {
   final String title;
   final String scoringMode;
   final List<dynamic> questions;
+  final int initialCumulativeScore;
+  final List<dynamic> initialAnsweredQuestions;
 
   const LiveQuizStudentScreen({
     super.key,
@@ -19,6 +21,8 @@ class LiveQuizStudentScreen extends StatefulWidget {
     required this.title,
     required this.scoringMode,
     required this.questions,
+    this.initialCumulativeScore = 0,
+    this.initialAnsweredQuestions = const [],
   });
 
   @override
@@ -44,6 +48,17 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
   @override
   void initState() {
     super.initState();
+    _cumulativeScore = widget.initialCumulativeScore;
+    if (widget.initialAnsweredQuestions.isNotEmpty) {
+      _correctAnswersCount = widget.initialAnsweredQuestions.where((a) => a['is_correct'] == true).length;
+      final answeredIds = widget.initialAnsweredQuestions.map((a) => a['question_id'].toString()).toSet();
+      final firstUnansweredIdx = widget.questions.indexWhere((q) => !answeredIds.contains(q['id'].toString()));
+      if (firstUnansweredIdx != -1) {
+        _currentQuestionIndex = firstUnansweredIdx;
+      } else {
+        _currentQuestionIndex = widget.questions.isNotEmpty ? widget.questions.length - 1 : 0;
+      }
+    }
     _startQuestionTimer();
   }
 

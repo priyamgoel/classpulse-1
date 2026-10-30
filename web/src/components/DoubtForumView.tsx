@@ -35,6 +35,7 @@ import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 import MasksIcon from '@mui/icons-material/Masks';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FilterListIcon from '@mui/icons-material/FilterList';
+import ClearIcon from '@mui/icons-material/Clear';
 import { CreateDoubtDialog } from './CreateDoubtDialog';
 import { DoubtDetailModal } from './DoubtDetailModal';
 import { EmptyState } from './EmptyState';
@@ -121,14 +122,15 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
     }
   };
 
-  const fetchPosts = async () => {
+  const fetchPosts = async (queryOverride?: string) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('classpulse_token');
       let url = '';
+      const effectiveQuery = (queryOverride !== undefined ? queryOverride : searchQuery).trim();
 
-      if (searchQuery.trim()) {
-        url = `${API_BASE_URL}/search?q=${encodeURIComponent(searchQuery.trim())}&course_id=${courseId}`;
+      if (effectiveQuery) {
+        url = `${API_BASE_URL}/search?q=${encodeURIComponent(effectiveQuery)}&course_id=${courseId}`;
       } else {
         url = `${API_BASE_URL}/doubts?course_id=${courseId}`;
       }
@@ -137,7 +139,7 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
       if (scopeTab !== 'ALL') url += `&scope=${scopeTab}`;
       if (selectedTopicId) url += `&topic_id=${selectedTopicId}`;
       if (statusFilter !== 'ALL') url += `&status=${statusFilter}`;
-      if (sortBy && !searchQuery.trim()) url += `&sort_by=${sortBy}`;
+      if (sortBy && !effectiveQuery) url += `&sort_by=${sortBy}`;
 
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -202,7 +204,7 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
         </Box>
 
         <Stack direction="row" spacing={1.5} alignItems="center">
-          <IconButton onClick={fetchPosts} size="small" sx={{ border: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+          <IconButton onClick={() => fetchPosts()} size="small" sx={{ border: `1px solid ${m3Tokens.color.outlineVariant}` }}>
             <RefreshIcon fontSize="small" />
           </IconButton>
           <Button
@@ -246,7 +248,13 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
                 size="small"
                 placeholder="Search questions by keyword or topic..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearchQuery(val);
+                  if (val === '') {
+                    fetchPosts('');
+                  }
+                }}
                 fullWidth
                 InputProps={{
                   startAdornment: (
@@ -254,6 +262,19 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
                       <SearchIcon sx={{ color: m3Tokens.color.onSurfaceVariant }} />
                     </InputAdornment>
                   ),
+                  endAdornment: searchQuery ? (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setSearchQuery('');
+                          fetchPosts('');
+                        }}
+                      >
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ) : null,
                 }}
               />
             </form>
@@ -302,6 +323,7 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
                 setStatusFilter('ALL');
                 setSortBy('recent');
                 setSearchQuery('');
+                fetchPosts('');
               }}
               sx={{ textTransform: 'none', fontWeight: 600 }}
             >

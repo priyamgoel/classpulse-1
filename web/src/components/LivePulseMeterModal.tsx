@@ -93,6 +93,8 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [isConcluded, setIsConcluded] = useState(false);
+
   // Mute Dialog State
   const [muteDialogOpen, setMuteDialogOpen] = useState(false);
   const [muteTargetStudentId, setMuteTargetStudentId] = useState<string | undefined>(undefined);
@@ -151,6 +153,9 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
         setPresentCount(data.presentCount);
         setAttendancePending(data.attendancePending);
         setDistribution(data.distribution || []);
+        if (data.liveActivity?.status === 'ENDED') {
+          setIsConcluded(true);
+        }
       } else {
         setError(data.error || 'Failed to load live activity analytics');
       }
@@ -172,8 +177,8 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
       });
       const data = await res.json();
       if (res.ok) {
+        setIsConcluded(true);
         onActivityEnded();
-        onClose();
       } else {
         setError(data.error || 'Failed to end live activity');
       }
@@ -221,10 +226,15 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
                   {pulsemeter.title}
                 </Typography>
                 <Chip
-                  label="LIVE"
-                  color="error"
+                  label={isConcluded ? 'CONCLUDED (FINAL RESULTS)' : 'LIVE'}
+                  color={isConcluded ? 'success' : 'error'}
                   size="small"
-                  sx={{ fontWeight: 800, height: 20, fontSize: '0.65rem', animation: 'pulse 1.5s infinite' }}
+                  sx={{
+                    fontWeight: 800,
+                    height: 20,
+                    fontSize: '0.65rem',
+                    animation: isConcluded ? 'none' : 'pulse 1.5s infinite',
+                  }}
                 />
               </Stack>
               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
@@ -241,23 +251,41 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
               variant="filled"
               sx={{ fontWeight: 700, fontSize: '0.85rem' }}
             />
-            <Button
-              variant="contained"
-              color="error"
-              size="small"
-              startIcon={ending ? <CircularProgress size={14} color="inherit" /> : <StopCircleIcon />}
-              onClick={handleEndActivity}
-              disabled={ending}
-              sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
-            >
-              {ending ? 'Ending...' : 'End Activity'}
-            </Button>
+            {isConcluded ? (
+              <Button
+                variant="outlined"
+                color="inherit"
+                size="small"
+                onClick={onClose}
+                sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
+              >
+                Close Projector View
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                color="error"
+                size="small"
+                startIcon={ending ? <CircularProgress size={14} color="inherit" /> : <StopCircleIcon />}
+                onClick={handleEndActivity}
+                disabled={ending}
+                sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
+              >
+                {ending ? 'Ending...' : 'End Activity'}
+              </Button>
+            )}
           </Stack>
         </Stack>
       </DialogTitle>
 
       {/* Main Content Area */}
       <DialogContent sx={{ p: 3, bgcolor: m3Tokens.color.background }}>
+        {isConcluded && (
+          <Alert severity="success" sx={{ mb: 2.5, borderRadius: '8px' }}>
+            <strong>PulseMeter Concluded:</strong> Student response collection has ended. You can keep these final charts on the projector for class discussion as long as you'd like.
+          </Alert>
+        )}
+
         {error && (
           <Alert severity="error" sx={{ mb: 2.5, borderRadius: '8px' }}>
             {error}
@@ -567,9 +595,12 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
         )}
       </DialogContent>
 
-      <DialogActions sx={{ p: 2, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
-        <Button onClick={onClose} sx={{ textTransform: 'none' }}>
-          Minimize Window
+      <DialogActions sx={{ p: 2, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}`, justifyContent: 'space-between' }}>
+        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+          {isConcluded ? 'PulseMeter is concluded. Final aggregate results are preserved above.' : 'Live Socket.io analytics feed connected.'}
+        </Typography>
+        <Button onClick={onClose} variant={isConcluded ? 'contained' : 'outlined'} sx={{ textTransform: 'none', fontWeight: 700 }}>
+          {isConcluded ? 'Close Projector View' : 'Minimize Window'}
         </Button>
       </DialogActions>
 

@@ -252,6 +252,53 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                 ),
               ),
 
+              // Search Input Field
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                color: Colors.white,
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search questions, keywords, topics...',
+                    hintStyle: const TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
+                    prefixIcon: const Icon(Icons.search, size: 20, color: M3Tokens.primary),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {});
+                              _fetchPosts();
+                            },
+                          )
+                        : null,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: M3Tokens.outlineVariant),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: M3Tokens.outlineVariant),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: M3Tokens.primary, width: 1.5),
+                    ),
+                  ),
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _fetchPosts(),
+                  onChanged: (val) {
+                    if (val.isEmpty) {
+                      _fetchPosts();
+                    } else {
+                      setState(() {});
+                    }
+                  },
+                ),
+              ),
+
               // Scope Navigation Filter Chips
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

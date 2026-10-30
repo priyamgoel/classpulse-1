@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -23,11 +24,24 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
   bool _isChecking = false;
   Map<String, dynamic>? _activeActivity;
   String? _message;
+  Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
     _loadClassrooms();
+    // Auto-poll every 4 seconds to discover live activities launched by the teacher
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (mounted && _selectedClassroomId != null && !_isChecking) {
+        _checkActiveActivity(_selectedClassroomId!, silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadClassrooms() async {
@@ -48,11 +62,13 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
     }
   }
 
-  Future<void> _checkActiveActivity(String classroomId) async {
-    setState(() {
-      _isChecking = true;
-      _message = null;
-    });
+  Future<void> _checkActiveActivity(String classroomId, {bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isChecking = true;
+        _message = null;
+      });
+    }
 
     try {
       final token = AuthService.token;
@@ -67,30 +83,38 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['active'] == true && data['activity'] != null) {
-          setState(() {
-            _activeActivity = data['activity'];
-            _isChecking = false;
-          });
+          if (mounted) {
+            setState(() {
+              _activeActivity = data['activity'];
+              _isChecking = false;
+            });
+          }
         } else {
+          if (mounted) {
+            setState(() {
+              _activeActivity = null;
+              _message = 'No PulseMeter activity is currently active for this section.';
+              _isChecking = false;
+            });
+          }
+        }
+      } else {
+        if (!silent && mounted) {
           setState(() {
             _activeActivity = null;
-            _message = 'No PulseMeter activity is currently active for this section.';
+            _message = 'Unable to check live activities.';
             _isChecking = false;
           });
         }
-      } else {
+      }
+    } catch (e) {
+      if (!silent && mounted) {
         setState(() {
           _activeActivity = null;
-          _message = 'Unable to check live activities.';
+          _message = 'Network error checking live activity.';
           _isChecking = false;
         });
       }
-    } catch (e) {
-      setState(() {
-        _activeActivity = null;
-        _message = 'Network error checking live activity.';
-        _isChecking = false;
-      });
     }
   }
 
@@ -99,6 +123,7 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
 
     final activity = _activeActivity!;
     final isQuiz = activity['activity_type'] == 'QUIZ';
+    final userResponse = activity['user_response'] as Map<String, dynamic>?;
 
     if (isQuiz && activity['quiz'] != null) {
       final quiz = activity['quiz'];
@@ -110,6 +135,8 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
             title: quiz['title'] ?? 'Live Quiz',
             scoringMode: quiz['scoring_mode'] ?? 'WIDE',
             questions: (quiz['questions'] as List?) ?? [],
+            initialCumulativeScore: (userResponse?['cumulative_score'] as int?) ?? 0,
+            initialAnsweredQuestions: (userResponse?['answered_questions'] as List?) ?? [],
           ),
         ),
       ).then((_) {
@@ -130,6 +157,8 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
             title: pulsemeter['title'] ?? 'Live PulseMeter',
             type: pulsemeter['type'] ?? 'WORD_CLOUD',
             config: (pulsemeter['config'] as Map<String, dynamic>?) ?? {},
+            initialHasSubmitted: userResponse?['has_responded'] == true,
+            initialResponseValue: userResponse?['response_value'],
           ),
         ),
       ).then((_) {

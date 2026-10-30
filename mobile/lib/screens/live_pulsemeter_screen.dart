@@ -10,6 +10,8 @@ class LivePulseMeterScreen extends StatefulWidget {
   final String title;
   final String type; // 'WORD_CLOUD', 'MCQ', 'RATING_SCALE'
   final Map<String, dynamic> config;
+  final bool initialHasSubmitted;
+  final dynamic initialResponseValue;
 
   const LivePulseMeterScreen({
     super.key,
@@ -18,6 +20,8 @@ class LivePulseMeterScreen extends StatefulWidget {
     required this.title,
     required this.type,
     required this.config,
+    this.initialHasSubmitted = false,
+    this.initialResponseValue,
   });
 
   @override
@@ -33,9 +37,38 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
   String? _errorMessage;
 
   @override
+  void initState() {
+    super.initState();
+    _hasSubmitted = widget.initialHasSubmitted;
+    if (widget.initialResponseValue != null) {
+      if (widget.type == 'WORD_CLOUD') {
+        _wordController.text = widget.initialResponseValue.toString();
+      } else if (widget.type == 'MCQ') {
+        _selectedOptionId = widget.initialResponseValue.toString();
+      } else if (widget.type == 'RATING_SCALE') {
+        _selectedRating = int.tryParse(widget.initialResponseValue.toString());
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _wordController.dispose();
     super.dispose();
+  }
+
+  String _getSubmittedDisplayValue() {
+    if (widget.type == 'WORD_CLOUD') {
+      return _wordController.text.isNotEmpty ? _wordController.text : (widget.initialResponseValue?.toString() ?? '');
+    } else if (widget.type == 'MCQ') {
+      final optId = _selectedOptionId ?? widget.initialResponseValue?.toString();
+      final options = (widget.config['options'] as List?) ?? [];
+      final opt = options.firstWhere((o) => o['id'] == optId, orElse: () => null);
+      return opt != null ? '${opt['text']}' : (optId ?? '');
+    } else if (widget.type == 'RATING_SCALE') {
+      return '${_selectedRating ?? widget.initialResponseValue} ★';
+    }
+    return '';
   }
 
   Future<void> _submitResponse() async {
@@ -246,6 +279,25 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
                       ),
+                      if (_getSubmittedDisplayValue().isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green.shade300),
+                          ),
+                          child: Text(
+                            'You submitted: ${_getSubmittedDisplayValue()}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: Colors.green.shade800,
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       OutlinedButton(
                         onPressed: () => Navigator.of(context).pop(),
