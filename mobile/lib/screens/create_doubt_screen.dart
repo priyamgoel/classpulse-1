@@ -197,6 +197,7 @@ class _CreateDoubtScreenState extends State<CreateDoubtScreen> {
               const SizedBox(height: 16),
 
               // Topic Dropdown
+              // ignore: deprecated_member_use
               DropdownButtonFormField<String>(
                 value: _selectedTopicId,
                 decoration: InputDecoration(

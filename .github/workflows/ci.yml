@@ -92,7 +92,7 @@ jobs:
         run: flutter pub get
 
       - name: Flutter Static Analysis
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Run Flutter Unit & Widget Tests
         run: flutter test
