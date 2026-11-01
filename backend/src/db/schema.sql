@@ -90,9 +90,14 @@ CREATE TABLE IF NOT EXISTS pulsemeter_responses (
   live_activity_id UUID NOT NULL REFERENCES live_activities(id) ON DELETE CASCADE,
   student_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   response_value   TEXT NOT NULL,
+  is_blocked       BOOLEAN NOT NULL DEFAULT false,
+  blocked_reason   TEXT,
   submitted_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (live_activity_id, student_id)
 );
+
+ALTER TABLE pulsemeter_responses ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE pulsemeter_responses ADD COLUMN IF NOT EXISTS blocked_reason TEXT;
 
 CREATE TABLE IF NOT EXISTS word_cloud_mutes (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),

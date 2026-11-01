@@ -22,6 +22,11 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  Tabs,
+  Tab,
+  Avatar,
+  TextField,
+  InputAdornment,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
@@ -29,9 +34,15 @@ import SpeedIcon from '@mui/icons-material/Speed';
 import PeopleIcon from '@mui/icons-material/People';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import LinearScaleIcon from '@mui/icons-material/LinearScale';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import BlockIcon from '@mui/icons-material/Block';
+import ShieldIcon from '@mui/icons-material/Shield';
+import GppMaybeIcon from '@mui/icons-material/GppMaybe';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import SearchIcon from '@mui/icons-material/Search';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import {
   BarChart,
   Bar,
@@ -117,14 +128,96 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
   // Mute Dialog State
   const [muteDialogOpen, setMuteDialogOpen] = useState(false);
   const [muteTargetStudentId, setMuteTargetStudentId] = useState<string | undefined>(undefined);
+  const [muteTargetStudentName, setMuteTargetStudentName] = useState<string | undefined>(undefined);
+  const [muteDefaultReason, setMuteDefaultReason] = useState<string | undefined>(undefined);
+
+  // Word Cloud Moderation & Submissions State
+  const [blockedCount, setBlockedCount] = useState<number>(0);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [submissionsModalOpen, setSubmissionsModalOpen] = useState(false);
+  const [selectedFilterWord, setSelectedFilterWord] = useState<string | null>(null);
+  const [moderationTab, setModerationTab] = useState<'ALL' | 'BLOCKED'>('ALL');
+  const [submissionActionLoading, setSubmissionActionLoading] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const socketRef = useRef<Socket | null>(null);
+
+  const fetchSubmissions = async () => {
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/word-cloud-submissions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSubmissions(data.submissions || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch word cloud submissions:', err);
+    }
+  };
+
+  const handleApproveSubmission = async (responseId: string) => {
+    setSubmissionActionLoading(responseId);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/responses/${responseId}/approve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.aggregated) {
+          if (data.aggregated.distribution) setDistribution(data.aggregated.distribution);
+          if (data.aggregated.blockedCount !== undefined) setBlockedCount(data.aggregated.blockedCount);
+        }
+        await fetchSubmissions();
+      }
+    } catch (err) {
+      console.error('Failed to approve submission:', err);
+    } finally {
+      setSubmissionActionLoading(null);
+    }
+  };
+
+  const handleDeleteSubmission = async (responseId: string) => {
+    setSubmissionActionLoading(responseId);
+    try {
+      const token = localStorage.getItem('classpulse_token');
+      const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/responses/${responseId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.aggregated) {
+          if (data.aggregated.distribution) setDistribution(data.aggregated.distribution);
+          if (data.aggregated.blockedCount !== undefined) setBlockedCount(data.aggregated.blockedCount);
+        }
+        await fetchSubmissions();
+      }
+    } catch (err) {
+      console.error('Failed to delete submission:', err);
+    } finally {
+      setSubmissionActionLoading(null);
+    }
+  };
+
+  const handleOpenMuteForStudent = (studentId: string, studentName: string, word: string) => {
+    setMuteTargetStudentId(studentId);
+    setMuteTargetStudentName(studentName);
+    setMuteDefaultReason(`Inappropriate word cloud submission: "${word}"`);
+    setMuteDialogOpen(true);
+  };
 
   // Fetch initial analytics & connect Socket.io
   useEffect(() => {
     if (!open || !activityId) return;
 
     fetchAnalytics();
+    if (pulsemeter.type === 'WORD_CLOUD') {
+      fetchSubmissions();
+    }
 
     const socket = io(API_BASE_URL);
     socketRef.current = socket;
@@ -139,6 +232,10 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
         if (data.presentCount !== undefined) setPresentCount(data.presentCount);
         if (data.attendancePending !== undefined) setAttendancePending(data.attendancePending);
         if (data.distribution) setDistribution(data.distribution);
+        if (data.blockedCount !== undefined) setBlockedCount(data.blockedCount);
+        if (pulsemeter.type === 'WORD_CLOUD') {
+          fetchSubmissions();
+        }
       }
     });
 
@@ -172,6 +269,7 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
         setPresentCount(data.presentCount);
         setAttendancePending(data.attendancePending);
         setDistribution(data.distribution || []);
+        if (data.blockedCount !== undefined) setBlockedCount(data.blockedCount);
         if (data.liveActivity?.status === 'ENDED') {
           setIsConcluded(true);
         }
@@ -538,44 +636,74 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
                         </Typography>
                       </Box>
                     ) : (
-                      <Box
-                        sx={{
-                          p: 3,
-                          borderRadius: '12px',
-                          bgcolor: m3Tokens.color.background,
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 2,
-                          minHeight: 240,
-                        }}
-                      >
-                        {distribution.map((item: any, idx: number) => {
-                          const size = getWordFontSize(Number(item.count));
-                          const color = chartTokens.palette[idx % chartTokens.palette.length];
-                          return (
-                            <Tooltip key={idx} title={`Mentioned ${item.count} times`}>
-                              <Typography
-                                component="span"
-                                sx={{
-                                  fontSize: `${size}px`,
-                                  fontWeight: 800,
-                                  color,
-                                  cursor: 'pointer',
-                                  transition: 'transform 0.15s ease',
-                                  userSelect: 'none',
-                                  '&:hover': {
-                                    transform: 'scale(1.15)',
-                                  },
-                                }}
+                      <>
+                        <Box
+                          sx={{
+                            p: 3,
+                            borderRadius: '12px',
+                            bgcolor: m3Tokens.color.background,
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 2,
+                            minHeight: 240,
+                          }}
+                        >
+                          {distribution.map((item: any, idx: number) => {
+                            const size = getWordFontSize(Number(item.count));
+                            const color = chartTokens.palette[idx % chartTokens.palette.length];
+                            return (
+                              <Tooltip
+                                key={idx}
+                                title={`"${item.word}" mentioned ${item.count} time${item.count > 1 ? 's' : ''} • Click to inspect student contributors`}
+                                arrow
                               >
-                                {item.word}
-                              </Typography>
-                            </Tooltip>
-                          );
-                        })}
-                      </Box>
+                                <Typography
+                                  component="span"
+                                  onClick={() => {
+                                    setSelectedFilterWord(item.word);
+                                    setModerationTab('ALL');
+                                    setSubmissionsModalOpen(true);
+                                  }}
+                                  sx={{
+                                    fontSize: `${size}px`,
+                                    fontWeight: 800,
+                                    color,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease',
+                                    userSelect: 'none',
+                                    '&:hover': {
+                                      transform: 'scale(1.15)',
+                                      textDecoration: 'underline',
+                                    },
+                                  }}
+                                >
+                                  {item.word}
+                                </Typography>
+                              </Tooltip>
+                            );
+                          })}
+                        </Box>
+                        <Box sx={{ mt: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                            💡 Click on any word in the cloud to view which students submitted it and mute offenders.
+                          </Typography>
+                          <Button
+                            size="small"
+                            variant="text"
+                            startIcon={<VisibilityIcon fontSize="small" />}
+                            onClick={() => {
+                              setSelectedFilterWord(null);
+                              setModerationTab('ALL');
+                              setSubmissionsModalOpen(true);
+                            }}
+                            sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.75rem' }}
+                          >
+                            View All Submissions ({submissions.length})
+                          </Button>
+                        </Box>
+                      </>
                     )}
                   </Box>
                 )}
@@ -679,38 +807,100 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
                   </Stack>
                 </Paper>
 
-                {/* Word Cloud Moderation Quick Action */}
+                {/* Word Cloud Moderation & Auto-Blocked Submissions Card */}
                 {pulsemeter.type === 'WORD_CLOUD' && (
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      borderRadius: '16px',
-                      border: `1px solid ${m3Tokens.color.outlineVariant}`,
-                      bgcolor: '#FFFFFF',
-                    }}
-                  >
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                      <BlockIcon sx={{ color: m3Tokens.color.error, fontSize: 18 }} />
-                      <Typography variant="subtitle2" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
-                        Word Cloud Moderation
-                      </Typography>
-                    </Stack>
-                    <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 1.5 }}>
-                      Mute abusive submissions for 7, 14, 30, 90, or 180 days.
-                    </Typography>
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      color="error"
-                      size="small"
-                      startIcon={<BlockIcon />}
-                      onClick={() => setMuteDialogOpen(true)}
-                      sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                  <Stack spacing={2}>
+                    {/* Auto-Blocked Alert Banner if blocked submissions exist */}
+                    {blockedCount > 0 && (
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          p: 2,
+                          borderRadius: '16px',
+                          border: `1px solid ${m3Tokens.color.error}`,
+                          bgcolor: '#FDF2F2',
+                        }}
+                      >
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                          <GppMaybeIcon color="error" fontSize="small" />
+                          <Typography variant="subtitle2" sx={{ fontWeight: 800, color: m3Tokens.color.error }}>
+                            {blockedCount} Auto-Blocked {blockedCount === 1 ? 'Response' : 'Responses'}
+                          </Typography>
+                        </Stack>
+                        <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 1.5 }}>
+                          Offensive words were auto-filtered and hidden from the public word cloud.
+                        </Typography>
+                        <Button
+                          fullWidth
+                          variant="contained"
+                          color="error"
+                          size="small"
+                          startIcon={<ShieldIcon />}
+                          onClick={() => {
+                            setSelectedFilterWord(null);
+                            setModerationTab('BLOCKED');
+                            setSubmissionsModalOpen(true);
+                          }}
+                          sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                        >
+                          Review & Approve ({blockedCount})
+                        </Button>
+                      </Paper>
+                    )}
+
+                    <Paper
+                      elevation={0}
+                      sx={{
+                        p: 2,
+                        borderRadius: '16px',
+                        border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                        bgcolor: '#FFFFFF',
+                      }}
                     >
-                      Mute Student
-                    </Button>
-                  </Paper>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                        <BlockIcon sx={{ color: m3Tokens.color.error, fontSize: 18 }} />
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
+                          Word Cloud Moderation
+                        </Typography>
+                      </Stack>
+                      <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 1.5 }}>
+                        Inspect student contributors, review auto-blocked entries, or mute students.
+                      </Typography>
+                      <Stack spacing={1}>
+                        <Button
+                          fullWidth
+                          variant="outlined"
+                          color="primary"
+                          size="small"
+                          startIcon={<VisibilityIcon />}
+                          onClick={() => {
+                            setSelectedFilterWord(null);
+                            setModerationTab('ALL');
+                            setSubmissionsModalOpen(true);
+                          }}
+                          sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                        >
+                          Inspect Submissions ({submissions.length})
+                        </Button>
+                        <Button
+                          fullWidth
+                          variant="outlined"
+                          color="error"
+                          size="small"
+                          startIcon={<BlockIcon />}
+                          onClick={() => {
+                            setMuteTargetStudentId(undefined);
+                            setMuteTargetStudentName(undefined);
+                            setMuteDefaultReason(undefined);
+                            setMuteDialogOpen(true);
+                          }}
+                          sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                        >
+                          Mute Student by ID
+                        </Button>
+                      </Stack>
+                    </Paper>
+                  </Stack>
                 )}
               </Stack>
             </Box>
@@ -727,12 +917,312 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
         </Button>
       </DialogActions>
 
+      {/* Word Cloud Student Submissions Audit & Moderation Modal */}
+      <Dialog
+        open={submissionsModalOpen}
+        onClose={() => {
+          setSubmissionsModalOpen(false);
+          setSelectedFilterWord(null);
+          setSearchQuery('');
+        }}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Stack direction="row" spacing={1} alignItems="center">
+              <VisibilityIcon color="primary" fontSize="small" />
+              <Typography variant="h6" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface, fontSize: '1.1rem' }}>
+                {selectedFilterWord
+                  ? `Submissions for "${selectedFilterWord}"`
+                  : moderationTab === 'BLOCKED'
+                  ? `Auto-Blocked Submissions (${blockedCount})`
+                  : 'Word Cloud Submissions Audit'}
+              </Typography>
+            </Stack>
+            <IconButton
+              size="small"
+              onClick={() => {
+                setSubmissionsModalOpen(false);
+                setSelectedFilterWord(null);
+                setSearchQuery('');
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Stack>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 2.5, bgcolor: '#FAFAFA' }}>
+          {selectedFilterWord ? (
+            <Alert
+              severity="info"
+              sx={{ mb: 2, borderRadius: '8px' }}
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => setSelectedFilterWord(null)}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  Show All Submissions
+                </Button>
+              }
+            >
+              Filtering by submissions matching word: <strong>"{selectedFilterWord}"</strong>
+            </Alert>
+          ) : (
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+              <Tabs
+                value={moderationTab}
+                onChange={(_, val) => setModerationTab(val)}
+                sx={{ minHeight: 40 }}
+              >
+                <Tab
+                  label={`All Submissions (${submissions.length})`}
+                  value="ALL"
+                  sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }}
+                />
+                <Tab
+                  label={
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span>Auto-Blocked</span>
+                      {blockedCount > 0 && (
+                        <Chip
+                          size="small"
+                          label={blockedCount}
+                          color="error"
+                          sx={{ height: 18, fontSize: '0.65rem', fontWeight: 800 }}
+                        />
+                      )}
+                    </Box>
+                  }
+                  value="BLOCKED"
+                  sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }}
+                />
+              </Tabs>
+            </Box>
+          )}
+
+          {/* Search Box */}
+          <TextField
+            placeholder="Search by student name, email, or submitted word..."
+            size="small"
+            fullWidth
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: m3Tokens.color.outline }} />
+                </InputAdornment>
+              ),
+            }}
+            sx={{ mb: 2, bgcolor: '#FFFFFF', borderRadius: '8px' }}
+          />
+
+          {/* Submissions Table */}
+          {submissions.filter((sub) => {
+            if (selectedFilterWord && sub.response_value.toLowerCase().trim() !== selectedFilterWord.toLowerCase().trim()) {
+              return false;
+            }
+            if (!selectedFilterWord && moderationTab === 'BLOCKED' && !sub.is_blocked) {
+              return false;
+            }
+            if (searchQuery.trim()) {
+              const q = searchQuery.toLowerCase().trim();
+              const mName = sub.student_name?.toLowerCase().includes(q);
+              const mEmail = sub.student_email?.toLowerCase().includes(q);
+              const mWord = sub.response_value?.toLowerCase().includes(q);
+              return mName || mEmail || mWord;
+            }
+            return true;
+          }).length === 0 ? (
+            <Paper elevation={0} sx={{ p: 4, textAlign: 'center', borderRadius: '12px', bgcolor: '#FFFFFF', border: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                {moderationTab === 'BLOCKED'
+                  ? 'No auto-blocked submissions found. All words passed profanity moderation!'
+                  : 'No matching submissions found.'}
+              </Typography>
+            </Paper>
+          ) : (
+            <Paper elevation={0} sx={{ borderRadius: '12px', border: `1px solid ${m3Tokens.color.outlineVariant}`, overflow: 'hidden', bgcolor: '#FFFFFF' }}>
+              <Table size="small">
+                <TableHead sx={{ bgcolor: '#F8F9FA' }}>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      STUDENT
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      SUBMITTED WORD
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      TIME
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      ACTIONS
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {submissions
+                    .filter((sub) => {
+                      if (selectedFilterWord && sub.response_value.toLowerCase().trim() !== selectedFilterWord.toLowerCase().trim()) {
+                        return false;
+                      }
+                      if (!selectedFilterWord && moderationTab === 'BLOCKED' && !sub.is_blocked) {
+                        return false;
+                      }
+                      if (searchQuery.trim()) {
+                        const q = searchQuery.toLowerCase().trim();
+                        const mName = sub.student_name?.toLowerCase().includes(q);
+                        const mEmail = sub.student_email?.toLowerCase().includes(q);
+                        const mWord = sub.response_value?.toLowerCase().includes(q);
+                        return mName || mEmail || mWord;
+                      }
+                      return true;
+                    })
+                    .map((item: any) => {
+                      const isActionBusy = submissionActionLoading === item.id;
+                      return (
+                        <TableRow key={item.id} hover>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                              <Avatar sx={{ width: 32, height: 32, fontSize: '0.85rem', bgcolor: m3Tokens.color.primary }}>
+                                {item.student_name ? item.student_name[0].toUpperCase() : '?'}
+                              </Avatar>
+                              <Box>
+                                <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                                  {item.student_name}
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                                  {item.student_email}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  fontWeight: 700,
+                                  color: item.is_blocked ? m3Tokens.color.error : m3Tokens.color.onSurface,
+                                  textDecoration: item.is_blocked ? 'line-through' : 'none',
+                                }}
+                              >
+                                {item.response_value}
+                              </Typography>
+                              {item.is_blocked && (
+                                <Tooltip title={item.blocked_reason || 'Auto-blocked by profanity filter'}>
+                                  <Chip
+                                    size="small"
+                                    color="error"
+                                    label="Auto-Blocked"
+                                    sx={{ height: 20, fontSize: '0.65rem', fontWeight: 800 }}
+                                  />
+                                </Tooltip>
+                              )}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                              {item.submitted_at
+                                ? new Date(item.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : '--'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={1} justifyContent="flex-end" alignItems="center">
+                              {/* Approve Button for false positives */}
+                              {item.is_blocked && (
+                                <Tooltip title="Approve if this was a false positive. Word will be added to the live cloud immediately.">
+                                  <span>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      color="success"
+                                      disabled={isActionBusy}
+                                      startIcon={isActionBusy ? <CircularProgress size={12} color="inherit" /> : <CheckCircleIcon />}
+                                      onClick={() => handleApproveSubmission(item.id)}
+                                      sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.75rem', borderRadius: '6px' }}
+                                    >
+                                      Approve
+                                    </Button>
+                                  </span>
+                                </Tooltip>
+                              )}
+
+                              {/* Delete Submission */}
+                              {item.is_blocked && (
+                                <Tooltip title="Delete submission permanently">
+                                  <span>
+                                    <IconButton
+                                      size="small"
+                                      color="error"
+                                      disabled={isActionBusy}
+                                      onClick={() => handleDeleteSubmission(item.id)}
+                                    >
+                                      <DeleteOutlineIcon fontSize="small" />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
+                              )}
+
+                              {/* Mute Student */}
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="error"
+                                startIcon={<BlockIcon />}
+                                onClick={() => handleOpenMuteForStudent(item.student_id, item.student_name, item.response_value)}
+                                sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.75rem', borderRadius: '6px' }}
+                              >
+                                Mute Student
+                              </Button>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                </TableBody>
+              </Table>
+            </Paper>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+          <Button
+            onClick={() => {
+              setSubmissionsModalOpen(false);
+              setSelectedFilterWord(null);
+              setSearchQuery('');
+            }}
+            variant="outlined"
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Mute Dialog */}
       <WordCloudMuteDialog
         open={muteDialogOpen}
-        onClose={() => setMuteDialogOpen(false)}
+        onClose={() => {
+          setMuteDialogOpen(false);
+          setMuteTargetStudentId(undefined);
+          setMuteTargetStudentName(undefined);
+          setMuteDefaultReason(undefined);
+        }}
         classroomId={classroomId}
         studentId={muteTargetStudentId}
+        studentName={muteTargetStudentName}
+        defaultReason={muteDefaultReason}
+        onSuccess={() => {
+          fetchSubmissions();
+          fetchAnalytics();
+        }}
       />
     </Dialog>
   );

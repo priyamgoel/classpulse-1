@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { checkProfanity } = require('../utils/profanityFilter');
 
 const router = express.Router();
 
@@ -140,6 +141,9 @@ router.post('/:id/respond', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Response cannot be empty' });
     }
 
+    let isBlocked = false;
+    let blockedReason = null;
+
     if (activity.pm_type === 'MCQ') {
       const validOptionIds = (activity.pm_config.options || []).map((o) => o.id);
       if (!validOptionIds.includes(responseStr)) {
@@ -152,14 +156,21 @@ router.post('/:id/respond', authenticateToken, async (req, res) => {
           error: `Rating must be between ${activity.pm_config.min || 1} and ${activity.pm_config.max || 5}`,
         });
       }
+    } else if (activity.pm_type === 'WORD_CLOUD') {
+      // Automatic profanity & offensive language check
+      const filterResult = checkProfanity(responseStr);
+      if (filterResult.isBlocked) {
+        isBlocked = true;
+        blockedReason = filterResult.reason;
+      }
     }
 
     // Insert response (unique constraint prevents duplicates)
     try {
       await db.query(
-        `INSERT INTO pulsemeter_responses (live_activity_id, student_id, response_value)
-         VALUES ($1, $2, $3)`,
-        [activityId, req.user.id, responseStr]
+        `INSERT INTO pulsemeter_responses (live_activity_id, student_id, response_value, is_blocked, blocked_reason)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [activityId, req.user.id, responseStr, isBlocked, blockedReason]
       );
     } catch (insertErr) {
       if (insertErr.constraint === 'pulsemeter_responses_live_activity_id_student_id_key') {
@@ -247,6 +258,167 @@ router.get('/:id/analytics', authenticateToken, requireRole('teacher'), async (r
   } catch (err) {
     console.error('[ClassPulse LiveActivity] Error fetching analytics:', err);
     res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
+/**
+ * GET /live-activities/:id/word-cloud-submissions
+ * Role: Teacher
+ * Returns all student submissions for a Word Cloud activity, including student details,
+ * response values, and whether they were auto-blocked.
+ */
+router.get('/:id/word-cloud-submissions', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const activityId = req.params.id;
+
+    const activityCheck = await db.query(
+      `SELECT la.*, c.teacher_id
+       FROM live_activities la
+       JOIN classrooms c ON la.classroom_id = c.id
+       WHERE la.id = $1`,
+      [activityId]
+    );
+
+    if (activityCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Live activity not found' });
+    }
+
+    if (activityCheck.rows[0].teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: You do not own this classroom' });
+    }
+
+    const result = await db.query(
+      `SELECT 
+         r.id,
+         r.student_id,
+         u.name as student_name,
+         u.email as student_email,
+         r.response_value,
+         r.is_blocked,
+         r.blocked_reason,
+         r.submitted_at
+       FROM pulsemeter_responses r
+       JOIN users u ON r.student_id = u.id
+       WHERE r.live_activity_id = $1
+       ORDER BY r.submitted_at DESC`,
+      [activityId]
+    );
+
+    res.json({ submissions: result.rows });
+  } catch (err) {
+    console.error('[ClassPulse LiveActivity] Error fetching word cloud submissions:', err);
+    res.status(500).json({ error: 'Failed to fetch word cloud submissions' });
+  }
+});
+
+/**
+ * POST /live-activities/:id/responses/:responseId/approve
+ * Role: Teacher
+ * Approves an auto-blocked submission (e.g. false positive), adding it immediately to the live Word Cloud.
+ */
+router.post('/:id/responses/:responseId/approve', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const { id: activityId, responseId } = req.params;
+
+    const activityCheck = await db.query(
+      `SELECT la.*, c.teacher_id, pm.type as pm_type, pm.config as pm_config
+       FROM live_activities la
+       JOIN classrooms c ON la.classroom_id = c.id
+       JOIN pulsemeters pm ON la.pulsemeter_id = pm.id
+       WHERE la.id = $1`,
+      [activityId]
+    );
+
+    if (activityCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Live activity not found' });
+    }
+
+    const activity = activityCheck.rows[0];
+
+    if (activity.teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: You do not own this classroom' });
+    }
+
+    const updateRes = await db.query(
+      `UPDATE pulsemeter_responses
+       SET is_blocked = false, blocked_reason = NULL
+       WHERE id = $1 AND live_activity_id = $2
+       RETURNING id, student_id, response_value, is_blocked`,
+      [responseId, activityId]
+    );
+
+    if (updateRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Response not found' });
+    }
+
+    // Recompute and emit live update
+    const aggregated = await computeAggregatedResults(activityId, activity);
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`activity_${activityId}_teacher`).emit('pulsemeter:results', {
+        activityId,
+        ...aggregated,
+      });
+    }
+
+    res.json({
+      message: 'Submission approved and added to Word Cloud',
+      response: updateRes.rows[0],
+      aggregated,
+    });
+  } catch (err) {
+    console.error('[ClassPulse LiveActivity] Error approving response:', err);
+    res.status(500).json({ error: 'Failed to approve response' });
+  }
+});
+
+/**
+ * DELETE /live-activities/:id/responses/:responseId
+ * Role: Teacher
+ * Permanently removes an offensive submission from the session.
+ */
+router.delete('/:id/responses/:responseId', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const { id: activityId, responseId } = req.params;
+
+    const activityCheck = await db.query(
+      `SELECT la.*, c.teacher_id, pm.type as pm_type, pm.config as pm_config
+       FROM live_activities la
+       JOIN classrooms c ON la.classroom_id = c.id
+       JOIN pulsemeters pm ON la.pulsemeter_id = pm.id
+       WHERE la.id = $1`,
+      [activityId]
+    );
+
+    if (activityCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Live activity not found' });
+    }
+
+    const activity = activityCheck.rows[0];
+
+    if (activity.teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: You do not own this classroom' });
+    }
+
+    await db.query(
+      `DELETE FROM pulsemeter_responses WHERE id = $1 AND live_activity_id = $2`,
+      [responseId, activityId]
+    );
+
+    // Recompute and emit live update
+    const aggregated = await computeAggregatedResults(activityId, activity);
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`activity_${activityId}_teacher`).emit('pulsemeter:results', {
+        activityId,
+        ...aggregated,
+      });
+    }
+
+    res.json({ message: 'Submission deleted successfully', aggregated });
+  } catch (err) {
+    console.error('[ClassPulse LiveActivity] Error deleting response:', err);
+    res.status(500).json({ error: 'Failed to delete response' });
   }
 });
 
@@ -790,6 +962,7 @@ async function computeAggregatedResults(activityId, activity) {
 
   // Type-specific distribution
   let distribution = [];
+  let blockedCount = 0;
 
   if (activity.pm_type === 'MCQ') {
     // Count per option
@@ -828,20 +1001,29 @@ async function computeAggregatedResults(activityId, activity) {
       });
     }
   } else if (activity.pm_type === 'WORD_CLOUD') {
-    // Count per word, sorted by frequency
+    // Count per word for approved/unblocked responses, sorted by frequency
     const distResult = await db.query(
       `SELECT LOWER(TRIM(response_value)) as word, COUNT(*)::int as count
        FROM pulsemeter_responses
-       WHERE live_activity_id = $1
+       WHERE live_activity_id = $1 AND is_blocked = false
        GROUP BY LOWER(TRIM(response_value))
        ORDER BY count DESC, word ASC
        LIMIT 100`,
       [activityId]
     );
     distribution = distResult.rows;
+
+    // Count auto-blocked submissions for moderation review
+    const blockedRes = await db.query(
+      `SELECT COUNT(*)::int as count
+       FROM pulsemeter_responses
+       WHERE live_activity_id = $1 AND is_blocked = true`,
+      [activityId]
+    );
+    blockedCount = blockedRes.rows[0]?.count || 0;
   }
 
-  return { responseCount, presentCount, attendancePending, distribution };
+  return { responseCount, presentCount, attendancePending, distribution, blockedCount };
 }
 
 module.exports = router;

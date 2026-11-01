@@ -29,6 +29,7 @@ interface WordCloudMuteDialogProps {
   classroomId: string;
   studentId?: string;
   studentName?: string;
+  defaultReason?: string;
   onSuccess?: () => void;
 }
 
@@ -40,11 +41,12 @@ export const WordCloudMuteDialog: React.FC<WordCloudMuteDialogProps> = ({
   classroomId,
   studentId,
   studentName,
+  defaultReason,
   onSuccess,
 }) => {
   const [targetStudentId, setTargetStudentId] = useState(studentId || '');
   const [durationDays, setDurationDays] = useState<number>(7);
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState(defaultReason || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +54,10 @@ export const WordCloudMuteDialog: React.FC<WordCloudMuteDialogProps> = ({
     if (studentId) {
       setTargetStudentId(studentId);
     }
-  }, [studentId]);
+    if (defaultReason) {
+      setReason(defaultReason);
+    }
+  }, [studentId, defaultReason]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
