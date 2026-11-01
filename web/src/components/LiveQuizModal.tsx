@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -113,6 +113,24 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentQuestion = quiz.questions[currentQuestionIndex] || quiz.questions[0];
+
+  const totalQuizQuestionVotes = useMemo(() => {
+    return distribution.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  }, [distribution]);
+
+  const quizDistributionData = useMemo(() => {
+    return distribution.map((item, index) => {
+      const shortCode =
+        item.option_id && item.option_id.toString().length <= 2
+          ? item.option_id.toString().toUpperCase()
+          : String.fromCharCode(65 + index);
+      return {
+        ...item,
+        shortCode,
+        displayLabel: `Option ${shortCode}`,
+      };
+    });
+  }, [distribution]);
 
   useEffect(() => {
     if (!open || !activityId) return;
@@ -472,12 +490,13 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
 
                 <Box sx={{ width: '100%', height: 260 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={distribution} margin={{ top: 15, right: 20, left: -15, bottom: 20 }}>
+                    <BarChart data={quizDistributionData} margin={{ top: 15, right: 20, left: -15, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
                       <XAxis
-                        dataKey="option_text"
+                        dataKey="displayLabel"
                         stroke={chartTokens.axis}
-                        tick={{ fill: chartTokens.axis, fontSize: 12 }}
+                        tick={{ fill: chartTokens.axis, fontSize: 13, fontWeight: 700 }}
+                        interval={0}
                       />
                       <YAxis
                         allowDecimals={false}
@@ -485,16 +504,43 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
                         tick={{ fill: chartTokens.axis, fontSize: 12 }}
                       />
                       <RechartsTooltip
-                        contentStyle={{
-                          backgroundColor: chartTokens.tooltipBg,
-                          borderColor: chartTokens.tooltipBorder,
-                          borderRadius: 8,
-                          fontSize: 12,
-                          fontWeight: 600,
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            const pct = totalQuizQuestionVotes > 0 ? Math.round(((data.count || 0) / totalQuizQuestionVotes) * 100) : 0;
+                            return (
+                              <Box
+                                sx={{
+                                  bgcolor: chartTokens.tooltipBg,
+                                  border: `1px solid ${chartTokens.tooltipBorder}`,
+                                  borderRadius: '8px',
+                                  p: 1.5,
+                                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                  maxWidth: 320,
+                                }}
+                              >
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 800, color: data.is_correct ? chartTokens.success : chartTokens.primary }}>
+                                    {data.displayLabel}
+                                  </Typography>
+                                  {data.is_correct && (
+                                    <Chip label="Correct" size="small" sx={{ height: 18, fontSize: '0.65rem', fontWeight: 800, bgcolor: '#E6F4EA', color: chartTokens.success }} />
+                                  )}
+                                </Box>
+                                <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurface, mb: 0.5 }}>
+                                  {data.option_text}
+                                </Typography>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: m3Tokens.color.onSurfaceVariant }}>
+                                  {data.count} {data.count === 1 ? 'student' : 'students'} ({pct}%)
+                                </Typography>
+                              </Box>
+                            );
+                          }
+                          return null;
                         }}
                       />
                       <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                        {distribution.map((entry, index) => (
+                        {quizDistributionData.map((entry, index) => (
                           <Cell
                             key={`cell-${index}`}
                             fill={entry.is_correct ? chartTokens.success : chartTokens.primary}
@@ -503,6 +549,100 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                </Box>
+
+                {/* Question Options Breakdown */}
+                <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontWeight: 700,
+                      color: m3Tokens.color.onSurfaceVariant,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      mb: 1.5,
+                      display: 'block',
+                    }}
+                  >
+                    Options Breakdown
+                  </Typography>
+                  <Stack spacing={1}>
+                    {quizDistributionData.map((item) => {
+                      const pct = totalQuizQuestionVotes > 0 ? Math.round(((item.count || 0) / totalQuizQuestionVotes) * 100) : 0;
+                      return (
+                        <Box
+                          key={item.option_id}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            p: 1.25,
+                            borderRadius: '10px',
+                            bgcolor: item.is_correct ? '#E6F4EA' : '#F8F9FA',
+                            border: `1px solid ${item.is_correct ? '#CEEAD6' : m3Tokens.color.outlineVariant}`,
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 1, minWidth: 0 }}>
+                            <Box
+                              sx={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: '50%',
+                                bgcolor: item.is_correct ? chartTokens.success : chartTokens.primary,
+                                color: '#FFFFFF',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 800,
+                                fontSize: 13,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {item.shortCode}
+                            </Box>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  color: m3Tokens.color.onSurface,
+                                  fontWeight: item.is_correct ? 700 : 500,
+                                  wordBreak: 'break-word',
+                                }}
+                              >
+                                {item.option_text}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+                            {item.is_correct && (
+                              <Chip
+                                size="small"
+                                label="Correct"
+                                sx={{
+                                  fontWeight: 800,
+                                  fontSize: '0.7rem',
+                                  bgcolor: '#CEEAD6',
+                                  color: '#0D652D',
+                                  borderRadius: '6px',
+                                }}
+                              />
+                            )}
+                            <Chip
+                              size="small"
+                              label={`${item.count} (${pct}%)`}
+                              sx={{
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                bgcolor: item.count > 0 ? '#E8F0FE' : '#F1F3F4',
+                                color: item.count > 0 ? '#1967D2' : '#5F6368',
+                                borderRadius: '6px',
+                              }}
+                            />
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Stack>
                 </Box>
 
                 <Box sx={{ mt: 2, textAlign: 'right' }}>

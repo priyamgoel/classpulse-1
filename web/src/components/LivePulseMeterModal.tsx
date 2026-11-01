@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -94,6 +94,25 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const [isConcluded, setIsConcluded] = useState(false);
+
+  const totalMcqVotes = useMemo(() => {
+    return distribution.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+  }, [distribution]);
+
+  const mcqChartData = useMemo(() => {
+    return distribution.map((item, index) => {
+      const shortCode =
+        item.option_id && item.option_id.toString().length <= 2
+          ? item.option_id.toString().toUpperCase()
+          : String.fromCharCode(65 + index);
+      return {
+        ...item,
+        shortCode,
+        displayLabel: `Option ${shortCode}`,
+        color: chartTokens.palette[index % chartTokens.palette.length],
+      };
+    });
+  }, [distribution]);
 
   // Mute Dialog State
   const [muteDialogOpen, setMuteDialogOpen] = useState(false);
@@ -321,7 +340,7 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
 
                 {/* 1. MCQ Bar Chart */}
                 {pulsemeter.type === 'MCQ' && (
-                  <Box sx={{ width: '100%', height: 320 }}>
+                  <Box sx={{ width: '100%' }}>
                     {distribution.length === 0 ? (
                       <Box sx={{ py: 8, textAlign: 'center' }}>
                         <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
@@ -329,39 +348,143 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
                         </Typography>
                       </Box>
                     ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={distribution} margin={{ top: 15, right: 20, left: -10, bottom: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
-                          <XAxis
-                            dataKey="option_text"
-                            stroke={chartTokens.axis}
-                            tick={{ fill: chartTokens.axis, fontSize: 12 }}
-                            interval={0}
-                          />
-                          <YAxis
-                            allowDecimals={false}
-                            stroke={chartTokens.axis}
-                            tick={{ fill: chartTokens.axis, fontSize: 12 }}
-                          />
-                          <RechartsTooltip
-                            contentStyle={{
-                              backgroundColor: chartTokens.tooltipBg,
-                              borderColor: chartTokens.tooltipBorder,
-                              borderRadius: 8,
-                              fontSize: 12,
-                              fontWeight: 600,
-                            }}
-                          />
-                          <Bar dataKey="count" fill={chartTokens.primary} radius={[6, 6, 0, 0]}>
-                            {distribution.map((entry, index) => (
-                              <Cell
-                                key={`cell-${index}`}
-                                fill={chartTokens.palette[index % chartTokens.palette.length]}
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <Box sx={{ width: '100%', height: 260 }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={mcqChartData} margin={{ top: 15, right: 20, left: -10, bottom: 20 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke={chartTokens.grid} vertical={false} />
+                              <XAxis
+                                dataKey="displayLabel"
+                                stroke={chartTokens.axis}
+                                tick={{ fill: chartTokens.axis, fontSize: 13, fontWeight: 700 }}
+                                interval={0}
                               />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                              <YAxis
+                                allowDecimals={false}
+                                stroke={chartTokens.axis}
+                                tick={{ fill: chartTokens.axis, fontSize: 12 }}
+                              />
+                              <RechartsTooltip
+                                content={({ active, payload }) => {
+                                  if (active && payload && payload.length) {
+                                    const data = payload[0].payload;
+                                    const pct = totalMcqVotes > 0 ? Math.round(((data.count || 0) / totalMcqVotes) * 100) : 0;
+                                    return (
+                                      <Box
+                                        sx={{
+                                          bgcolor: chartTokens.tooltipBg,
+                                          border: `1px solid ${chartTokens.tooltipBorder}`,
+                                          borderRadius: '8px',
+                                          p: 1.5,
+                                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                          maxWidth: 320,
+                                        }}
+                                      >
+                                        <Typography variant="caption" sx={{ fontWeight: 800, color: data.color, display: 'block' }}>
+                                          {data.displayLabel}
+                                        </Typography>
+                                        <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurface, my: 0.5 }}>
+                                          {data.option_text}
+                                        </Typography>
+                                        <Typography variant="caption" sx={{ fontWeight: 700, color: m3Tokens.color.onSurfaceVariant }}>
+                                          {data.count} {data.count === 1 ? 'vote' : 'votes'} ({pct}%)
+                                        </Typography>
+                                      </Box>
+                                    );
+                                  }
+                                  return null;
+                                }}
+                              />
+                              <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                                {mcqChartData.map((entry, index) => (
+                                  <Cell
+                                    key={`cell-${index}`}
+                                    fill={entry.color}
+                                  />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </Box>
+
+                        {/* Options Breakdown / Legend */}
+                        <Box sx={{ pt: 1, borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              fontWeight: 700,
+                              color: m3Tokens.color.onSurfaceVariant,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              mb: 1.5,
+                              display: 'block',
+                            }}
+                          >
+                            Options Legend
+                          </Typography>
+                          <Stack spacing={1}>
+                            {mcqChartData.map((item) => {
+                              const pct = totalMcqVotes > 0 ? Math.round(((item.count || 0) / totalMcqVotes) * 100) : 0;
+                              return (
+                                <Box
+                                  key={item.option_id}
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    p: 1.25,
+                                    borderRadius: '10px',
+                                    bgcolor: '#F8F9FA',
+                                    border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                                  }}
+                                >
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mr: 1, minWidth: 0 }}>
+                                    <Box
+                                      sx={{
+                                        width: 28,
+                                        height: 28,
+                                        borderRadius: '50%',
+                                        bgcolor: item.color,
+                                        color: '#FFFFFF',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        fontWeight: 800,
+                                        fontSize: 13,
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {item.shortCode}
+                                    </Box>
+                                    <Typography
+                                      variant="body2"
+                                      sx={{
+                                        color: m3Tokens.color.onSurface,
+                                        fontWeight: 600,
+                                        wordBreak: 'break-word',
+                                      }}
+                                    >
+                                      {item.option_text}
+                                    </Typography>
+                                  </Box>
+                                  <Chip
+                                    size="small"
+                                    label={`${item.count} ${item.count === 1 ? 'vote' : 'votes'} (${pct}%)`}
+                                    sx={{
+                                      fontWeight: 700,
+                                      fontSize: '0.75rem',
+                                      bgcolor: item.count > 0 ? '#E8F0FE' : '#F1F3F4',
+                                      color: item.count > 0 ? '#1967D2' : '#5F6368',
+                                      borderRadius: '6px',
+                                      flexShrink: 0,
+                                    }}
+                                  />
+                                </Box>
+                              );
+                            })}
+                          </Stack>
+                        </Box>
+                      </Box>
                     )}
                   </Box>
                 )}
