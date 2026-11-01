@@ -241,6 +241,102 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
 });
 
 /**
+ * PUT /pulsemeters/:id
+ * Role: Teacher
+ * Edit an authored PulseMeter (title, type, config)
+ */
+router.put('/:id', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const pulseMeterId = req.params.id;
+    const { title, type, config } = req.body;
+
+    if (!title || !type) {
+      return res.status(400).json({ error: 'Title and type are required.' });
+    }
+
+    const validTypes = ['WORD_CLOUD', 'MCQ', 'RATING_SCALE'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: `Invalid type. Must be one of: ${validTypes.join(', ')}` });
+    }
+
+    const pmCheck = await db.query(
+      `SELECT p.id, c.teacher_id 
+       FROM pulsemeters p 
+       JOIN classrooms c ON p.classroom_id = c.id 
+       WHERE p.id = $1`,
+      [pulseMeterId]
+    );
+
+    if (pmCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'PulseMeter not found.' });
+    }
+
+    if (pmCheck.rows[0].teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'You do not have permission to edit this PulseMeter.' });
+    }
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      return res.status(400).json({ error: 'PulseMeter title cannot be empty.' });
+    }
+
+    let sanitizedConfig = config || {};
+
+    if (type === 'MCQ') {
+      if (!sanitizedConfig.options || !Array.isArray(sanitizedConfig.options) || sanitizedConfig.options.length < 2) {
+        return res.status(400).json({ error: 'MCQ PulseMeter requires at least 2 options.' });
+      }
+
+      const formattedOptions = sanitizedConfig.options.map((opt, idx) => {
+        const text = typeof opt === 'string' ? opt.trim() : (opt.text || '').trim();
+        const id = (opt && opt.id) ? opt.id : String.fromCharCode(97 + idx);
+        return { id, text };
+      });
+
+      if (formattedOptions.some(opt => !opt.text)) {
+        return res.status(400).json({ error: 'All MCQ options must have non-empty text.' });
+      }
+
+      sanitizedConfig = { options: formattedOptions };
+    } else if (type === 'RATING_SCALE') {
+      const min = parseInt(sanitizedConfig.min, 10) || 1;
+      const max = parseInt(sanitizedConfig.max, 10) || 5;
+
+      if (min >= max || min < 1 || max > 10) {
+        return res.status(400).json({ error: 'Rating scale min must be >= 1 and max must be > min (up to 10).' });
+      }
+
+      sanitizedConfig = {
+        min,
+        max,
+        low_label: sanitizedConfig.low_label ? sanitizedConfig.low_label.trim() : 'Lowest',
+        high_label: sanitizedConfig.high_label ? sanitizedConfig.high_label.trim() : 'Highest',
+      };
+    } else if (type === 'WORD_CLOUD') {
+      sanitizedConfig = {
+        prompt: sanitizedConfig.prompt ? sanitizedConfig.prompt.trim() : trimmedTitle,
+      };
+    }
+
+    const updateResult = await db.query(
+      `UPDATE pulsemeters
+       SET title = $1, type = $2, config = $3
+       WHERE id = $4
+       RETURNING id, classroom_id, created_by, title, type, config, created_at`,
+      [trimmedTitle, type, JSON.stringify(sanitizedConfig), pulseMeterId]
+    );
+
+    res.json({
+      message: 'PulseMeter updated successfully',
+      pulsemeter: updateResult.rows[0],
+    });
+  } catch (err) {
+    console.error('[ClassPulse PulseMeter] Error updating PulseMeter:', err);
+    res.status(500).json({ error: 'Failed to update PulseMeter activity.' });
+  }
+});
+
+/**
  * DELETE /pulsemeters/:id
  * Role: Teacher
  * Delete an authored PulseMeter.

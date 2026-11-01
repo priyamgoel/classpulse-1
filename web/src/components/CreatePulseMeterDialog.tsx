@@ -30,13 +30,16 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import LinearScaleIcon from '@mui/icons-material/LinearScale';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { m3Tokens } from '@/theme/tokens';
+import { PulseMeter } from './PulseMeterAuthoringView';
 
 interface CreatePulseMeterDialogProps {
   open: boolean;
   onClose: () => void;
   classroomId: string;
   onSuccess: () => void;
+  pulseMeterToEdit?: PulseMeter | null;
 }
 
 type PulseMeterType = 'WORD_CLOUD' | 'MCQ' | 'RATING_SCALE';
@@ -48,7 +51,9 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
   onClose,
   classroomId,
   onSuccess,
+  pulseMeterToEdit,
 }) => {
+  const isEditing = Boolean(pulseMeterToEdit);
   const [title, setTitle] = useState('');
   const [type, setType] = useState<PulseMeterType>('WORD_CLOUD');
   
@@ -65,6 +70,41 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Sync state when dialog opens or pulseMeterToEdit changes
+  React.useEffect(() => {
+    if (open) {
+      setError(null);
+      if (pulseMeterToEdit) {
+        setTitle(pulseMeterToEdit.title || '');
+        setType(pulseMeterToEdit.type || 'WORD_CLOUD');
+
+        if (pulseMeterToEdit.type === 'WORD_CLOUD') {
+          setWcPrompt(pulseMeterToEdit.config?.prompt || pulseMeterToEdit.title || '');
+        } else if (pulseMeterToEdit.type === 'MCQ') {
+          const opts = pulseMeterToEdit.config?.options;
+          if (Array.isArray(opts) && opts.length >= 2) {
+            setMcqOptions(opts.map((o: any) => (typeof o === 'string' ? o : o.text || '')));
+          } else {
+            setMcqOptions(['Option A', 'Option B', 'Option C']);
+          }
+        } else if (pulseMeterToEdit.type === 'RATING_SCALE') {
+          setScaleMax(Number(pulseMeterToEdit.config?.max) || 5);
+          setLowLabel(pulseMeterToEdit.config?.low_label || 'Poor understanding');
+          setHighLabel(pulseMeterToEdit.config?.high_label || 'Crystal clear');
+        }
+      } else {
+        // Reset to clean create state
+        setTitle('');
+        setType('WORD_CLOUD');
+        setWcPrompt('');
+        setMcqOptions(['Option A', 'Option B', 'Option C']);
+        setScaleMax(5);
+        setLowLabel('Poor understanding');
+        setHighLabel('Crystal clear');
+      }
+    }
+  }, [open, pulseMeterToEdit]);
 
   const handleAddOption = () => {
     if (mcqOptions.length < 6) {
@@ -124,8 +164,13 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
 
     try {
       const token = localStorage.getItem('classpulse_token');
-      const response = await fetch(`${API_BASE_URL}/pulsemeters`, {
-        method: 'POST',
+      const url = isEditing
+        ? `${API_BASE_URL}/pulsemeters/${pulseMeterToEdit!.id}`
+        : `${API_BASE_URL}/pulsemeters`;
+      const method = isEditing ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -141,20 +186,13 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
       const data = await response.json();
 
       if (response.ok) {
-        // Reset form
-        setTitle('');
-        setWcPrompt('');
-        setMcqOptions(['Option A', 'Option B', 'Option C']);
-        setScaleMax(5);
-        setLowLabel('Poor understanding');
-        setHighLabel('Crystal clear');
         onSuccess();
         onClose();
       } else {
-        setError(data.error || 'Failed to create PulseMeter');
+        setError(data.error || `Failed to ${isEditing ? 'update' : 'create'} PulseMeter`);
       }
     } catch {
-      setError('Network error creating PulseMeter. Please check your connection.');
+      setError(`Network error ${isEditing ? 'updating' : 'creating'} PulseMeter. Please check your connection.`);
     } finally {
       setLoading(false);
     }
@@ -165,7 +203,7 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
       <DialogTitle sx={{ fontWeight: 700, bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Typography variant="h6" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
-            Create Reusable PulseMeter
+            {isEditing ? 'Edit PulseMeter' : 'Create Reusable PulseMeter'}
           </Typography>
           <IconButton size="small" onClick={onClose} disabled={loading}>
             <CloseIcon />
@@ -419,7 +457,7 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
             startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}
             sx={{ fontWeight: 700, textTransform: 'none', px: 3 }}
           >
-            {loading ? 'Creating...' : 'Create PulseMeter'}
+            {loading ? (isEditing ? 'Saving...' : 'Creating...') : (isEditing ? 'Save Changes' : 'Create PulseMeter')}
           </Button>
         </DialogActions>
       </form>

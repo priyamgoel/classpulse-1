@@ -27,6 +27,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import LinearScaleIcon from '@mui/icons-material/LinearScale';
 import SpeedIcon from '@mui/icons-material/Speed';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { CreatePulseMeterDialog } from './CreatePulseMeterDialog';
 import { LivePulseMeterModal, PulseMeterInfo } from './LivePulseMeterModal';
 import { m3Tokens } from '@/theme/tokens';
@@ -52,6 +53,7 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
   const [pulsemeters, setPulsemeters] = useState<PulseMeter[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editingPulseMeter, setEditingPulseMeter] = useState<PulseMeter | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Live Activity State
@@ -371,6 +373,19 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
                     >
                       {launchingId === pm.id ? 'Launching...' : 'Launch Live Activity'}
                     </Button>
+                    <Tooltip title="Edit PulseMeter">
+                      <IconButton
+                        color="primary"
+                        onClick={() => setEditingPulseMeter(pm)}
+                        sx={{
+                          border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                          borderRadius: '8px',
+                          p: 1,
+                        }}
+                      >
+                        <EditOutlinedIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Delete PulseMeter">
                       <IconButton
                         color="error"
@@ -421,12 +436,16 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
         </DialogActions>
       </Dialog>
 
-      {/* Create Dialog */}
+      {/* Create / Edit Dialog */}
       <CreatePulseMeterDialog
-        open={createDialogOpen}
-        onClose={() => setCreateDialogOpen(false)}
+        open={createDialogOpen || Boolean(editingPulseMeter)}
+        onClose={() => {
+          setCreateDialogOpen(false);
+          setEditingPulseMeter(null);
+        }}
         classroomId={classroomId}
         onSuccess={fetchPulsemeters}
+        pulseMeterToEdit={editingPulseMeter}
       />
 
       {/* Live PulseMeter Modal */}
