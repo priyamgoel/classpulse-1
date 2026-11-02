@@ -33,6 +33,7 @@ import LinearScaleIcon from '@mui/icons-material/LinearScale';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { m3Tokens } from '@/theme/tokens';
 import { PulseMeter } from './PulseMeterAuthoringView';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface CreatePulseMeterDialogProps {
   open: boolean;
@@ -163,7 +164,6 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
     setLoading(true);
 
     try {
-      const token = localStorage.getItem('classpulse_token');
       const url = isEditing
         ? `${API_BASE_URL}/pulsemeters/${pulseMeterToEdit!.id}`
         : `${API_BASE_URL}/pulsemeters`;
@@ -173,7 +173,7 @@ export const CreatePulseMeterDialog: React.FC<CreatePulseMeterDialogProps> = ({
         method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           classroom_id: classroomId,

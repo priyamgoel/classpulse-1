@@ -53,6 +53,8 @@ import { PulseMeterAuthoringView } from '@/components/PulseMeterAuthoringView';
 import { QuizAuthoringView } from '@/components/QuizAuthoringView';
 import { DoubtForumView } from '@/components/DoubtForumView';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthToken } from '@/lib/authStorage';
+import { apiFetch, readJson } from '@/lib/api';
 
 export interface Classroom {
   id: string;
@@ -71,8 +73,6 @@ export interface Classroom {
   resolved_doubts_count?: number;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
 export default function HomePage() {
   const [mainNavTab, setMainNavTab] = useState(0); // 0: Classrooms, 1: Attendance, 5: Profile
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -80,6 +80,7 @@ export default function HomePage() {
   const [detailTab, setDetailTab] = useState(0);
   const [loadingClassrooms, setLoadingClassrooms] = useState(true);
   const [startingSession, setStartingSession] = useState(false);
+  const [endingSession, setEndingSession] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -116,6 +117,11 @@ export default function HomePage() {
     if (!loading && !user) {
       router.push('/login');
     } else if (user) {
+      if (user.role !== 'teacher') {
+        // The web dashboard is instructor-only; students use the Android app.
+        router.replace('/login?reason=instructor_only');
+        return;
+      }
       fetchClassrooms();
       checkActiveSession();
     }
@@ -123,18 +129,13 @@ export default function HomePage() {
 
   const checkActiveSession = async () => {
     try {
-      const token = localStorage.getItem('classpulse_token');
-      if (!token) return;
-      const res = await fetch(`${API_BASE_URL}/sessions/active-mine`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      if (!getAuthToken()) return;
+      const res = await apiFetch('/sessions/active-mine');
+      const data = await readJson<{ session?: LiveSession | null; sessions?: LiveSession[] }>(res);
       if (res.ok) {
-        const data = await res.json();
-        if (data.session) {
-          setActiveLiveSession(data.session);
-        } else {
-          setActiveLiveSession(null);
-        }
+        // New contract returns both `sessions` and a convenience `session`.
+        const session = data?.session || data?.sessions?.[0] || null;
+        setActiveLiveSession(session);
       }
     } catch (err) {
       console.error('Error checking active session:', err);
@@ -144,13 +145,10 @@ export default function HomePage() {
   const fetchClassrooms = async () => {
     setLoadingClassrooms(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const response = await fetch(`${API_BASE_URL}/classrooms/mine`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
+      const response = await apiFetch('/classrooms/mine');
+      const data = await readJson<{ classrooms?: Classroom[] }>(response);
       if (response.ok) {
-        const fetched = data.classrooms || [];
+        const fetched = data?.classrooms || [];
         setClassrooms(fetched);
         if (fetched.length > 0 && !selectedClassroomId) {
           setSelectedClassroomId(fetched[0].id);
@@ -167,21 +165,17 @@ export default function HomePage() {
     setStartingSession(true);
     setSessionError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const res = await fetch(`${API_BASE_URL}/sessions`, {
+      const res = await apiFetch('/sessions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ classroom_id: classroom.id }),
       });
-      const data = await res.json();
-      if (res.ok && data.session) {
+      const data = await readJson<{ session?: LiveSession; error?: string }>(res);
+      if (res.ok && data?.session) {
         setActiveLiveSession(data.session);
         setLiveSessionModalOpen(true);
       } else {
-        setSessionError(data.error || 'Failed to start session');
+        setSessionError(data?.error || 'Failed to start session');
       }
     } catch {
       setSessionError('Network error starting attendance session');
@@ -190,21 +184,38 @@ export default function HomePage() {
     }
   };
 
+  const handleEndActiveSession = async () => {
+    if (!activeLiveSession) return;
+    setEndingSession(true);
+    setSessionError(null);
+    try {
+      const res = await apiFetch(`/sessions/${activeLiveSession.id}/end`, { method: 'POST' });
+      if (res.ok) {
+        setActiveLiveSession(null);
+        setLiveSessionModalOpen(false);
+        fetchClassrooms();
+      } else {
+        const data = await readJson<{ error?: string }>(res);
+        setSessionError(data?.error || 'Failed to end attendance session');
+      }
+    } catch {
+      setSessionError('Network error ending attendance session');
+    } finally {
+      setEndingSession(false);
+    }
+  };
+
   const handleDeleteClassroom = async (classroom: Classroom) => {
     setDeletingId(classroom.id);
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const res = await fetch(`${API_BASE_URL}/classrooms/${classroom.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`/classrooms/${classroom.id}`, { method: 'DELETE' });
       if (res.ok) {
         setDeleteConfirmClassroom(null);
         if (selectedClassroomId === classroom.id) setSelectedClassroomId(null);
         fetchClassrooms();
       } else {
-        const data = await res.json();
-        setSessionError(data.error || 'Failed to delete classroom');
+        const data = await readJson<{ error?: string }>(res);
+        setSessionError(data?.error || 'Failed to delete classroom');
       }
     } catch {
       setSessionError('Network error deleting classroom');
@@ -301,19 +312,11 @@ export default function HomePage() {
                 size="small"
                 variant="contained"
                 color="error"
-                onClick={async () => {
-                  const token = localStorage.getItem('classpulse_token');
-                  await fetch(`${API_BASE_URL}/sessions/${activeLiveSession.id}/end`, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${token}` },
-                  });
-                  setActiveLiveSession(null);
-                  setLiveSessionModalOpen(false);
-                  fetchClassrooms();
-                }}
+                onClick={handleEndActiveSession}
+                disabled={endingSession}
                 sx={{ fontWeight: 700 }}
               >
-                End Attendance Session
+                {endingSession ? 'Ending...' : 'End Attendance Session'}
               </Button>
             </Stack>
           </Stack>

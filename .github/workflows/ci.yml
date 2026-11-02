@@ -25,10 +25,10 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Syntax & Lint Verification
-        run: node -c src/index.js src/db/index.js src/services/qrTokenService.js
+      - name: Syntax Verification
+        run: find src -name '*.js' -print0 | xargs -0 -n1 node --check
 
       - name: Run Backend Tests
         run: npm test
@@ -51,7 +51,10 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Run Web Tests
+        run: npm test
 
       - name: Build Next.js Production App
         run: npm run build

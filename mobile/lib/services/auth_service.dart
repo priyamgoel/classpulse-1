@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'jwt.dart';
 
 class User {
   final String id;
@@ -38,7 +40,10 @@ class User {
 
 class AuthService {
   // Live Cloud Backend on Render (No local Wi-Fi or USB wires needed!)
-  static String baseUrl = const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://classpulse-api-09dw.onrender.com');
+  static String baseUrl = const String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://classpulse-api-09dw.onrender.com',
+  );
 
   static String? _token;
   static User? _currentUser;
@@ -56,7 +61,16 @@ class AuthService {
       final savedToken = prefs.getString(_keyToken);
       final savedUserJson = prefs.getString(_keyUser);
 
-      if (savedToken != null && savedToken.isNotEmpty && savedUserJson != null && savedUserJson.isNotEmpty) {
+      if (savedToken != null &&
+          savedToken.isNotEmpty &&
+          savedUserJson != null &&
+          savedUserJson.isNotEmpty) {
+        // Never restore a session the backend is guaranteed to reject.
+        if (isJwtExpired(savedToken)) {
+          await logout();
+          return false;
+        }
+
         _token = savedToken;
         _currentUser = User.fromJson(jsonDecode(savedUserJson));
         return true;
@@ -76,16 +90,18 @@ class AuthService {
     bool rememberMe = true,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/auth/signup'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-          'full_name': fullName,
-          'role': role,
-        }),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/auth/signup'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'password': password,
+              'full_name': fullName,
+              'role': role,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(response.body);
 
@@ -97,12 +113,21 @@ class AuthService {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_keyToken, _token!);
           await prefs.setString(_keyUser, jsonEncode(_currentUser!.toJson()));
+        } else {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_keyToken);
+          await prefs.remove(_keyUser);
         }
 
         return {'success': true};
       } else {
         return {'success': false, 'error': data['error'] ?? 'Signup failed'};
       }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'error': 'The server did not respond. Please try again.',
+      };
     } catch (e) {
       return {'success': false, 'error': 'Network error: $e'};
     }
@@ -114,14 +139,13 @@ class AuthService {
     bool rememberMe = true,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email,
-          'password': password,
-        }),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/auth/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'email': email, 'password': password}),
+          )
+          .timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(response.body);
 
@@ -133,12 +157,21 @@ class AuthService {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_keyToken, _token!);
           await prefs.setString(_keyUser, jsonEncode(_currentUser!.toJson()));
+        } else {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_keyToken);
+          await prefs.remove(_keyUser);
         }
 
         return {'success': true};
       } else {
         return {'success': false, 'error': data['error'] ?? 'Login failed'};
       }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'error': 'The server did not respond. Please try again.',
+      };
     } catch (e) {
       return {'success': false, 'error': 'Network error: $e'};
     }
@@ -154,4 +187,3 @@ class AuthService {
     } catch (_) {}
   }
 }
-

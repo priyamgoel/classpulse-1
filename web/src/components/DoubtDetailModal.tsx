@@ -38,11 +38,12 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import { useAuth } from '@/context/AuthContext';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 export interface DoubtReply {
   id: string;
   doubt_post_id: string;
-  author_id: string;
+  author_id: string | null;
   author_display_name: string;
   author_real_name?: string | null;
   author_role?: string;
@@ -64,7 +65,7 @@ export interface DoubtPostDetail {
   topic_name?: string;
   course_code: string;
   course_name: string;
-  author_id: string;
+  author_id: string | null;
   author_display_name: string;
   author_real_name?: string | null;
   author_role?: string;
@@ -105,6 +106,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const { user } = useAuth();
+  const isTeacher = currentUserRole === 'teacher' || user?.role === 'teacher';
   const [deleteDialogTarget, setDeleteDialogTarget] = useState<{ type: 'post' | 'reply'; id: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -136,12 +138,11 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
     if (!post || !editTitle.trim() || !editBody.trim()) return;
     setIsSavingPost(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/${post.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           title: editTitle.trim(),
@@ -177,12 +178,11 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
     if (!editingReply || !editReplyBody.trim()) return;
     setIsSavingReply(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/replies/${editingReply.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           body: editReplyBody.trim(),
@@ -217,11 +217,10 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
     if (!deleteDialogTarget) return;
     setIsDeleting(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       if (deleteDialogTarget.type === 'post') {
         const res = await fetch(`${API_BASE_URL}/doubts/${deleteDialogTarget.id}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: getAuthHeaders(),
         });
         if (res.ok) {
           setDeleteDialogTarget(null);
@@ -234,7 +233,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
       } else {
         const res = await fetch(`${API_BASE_URL}/doubts/replies/${deleteDialogTarget.id}`, {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: getAuthHeaders(),
         });
         if (res.ok) {
           setDeleteDialogTarget(null);
@@ -257,9 +256,8 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
     setError(null);
     setRevealedAuthor(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/${doubtId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok && data.post) {
@@ -279,12 +277,11 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   const handleTogglePostHelpful = async () => {
     if (!post) return;
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/helpful`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ target_type: 'POST', target_id: post.id }),
       });
@@ -304,12 +301,11 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
 
   const handleToggleReplyHelpful = async (replyId: string) => {
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/helpful`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ target_type: 'REPLY', target_id: replyId }),
       });
@@ -331,10 +327,9 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   const handleRevealAuthor = async () => {
     if (!post) return;
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/${post.id}/reveal-author`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok && data.author) {
@@ -347,10 +342,9 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
 
   const handleAcceptSolution = async (replyId: string) => {
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/replies/${replyId}/accept-solution`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -364,10 +358,9 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
 
   const handleEndorseReply = async (replyId: string) => {
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/replies/${replyId}/endorse`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -388,12 +381,11 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
 
     setSubmittingReply(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/${post.id}/replies`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           body: replyBody.trim(),
@@ -516,12 +508,12 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                       fontWeight: 800,
                     }}
                   >
-                    {post.is_anonymous ? <MasksIcon sx={{ fontSize: 18 }} /> : post.author_display_name[0]}
+                    {post.is_anonymous ? <MasksIcon sx={{ fontSize: 18 }} /> : post.author_display_name?.[0] || '?'}
                   </Avatar>
                   <Box>
                     <Stack direction="row" spacing={1} alignItems="center">
                       <Typography variant="subtitle2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
-                        {post.author_display_name}
+                        {post.author_display_name || 'Anonymous'}
                       </Typography>
                       {post.is_anonymous && (
                         <Chip
@@ -553,7 +545,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                   )}
 
                   {/* Edit Post Button (Author or Teacher) */}
-                  {(post.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                  {(isTeacher || (!!post.author_id && post.author_id === user?.id)) && (
                     <Button
                       size="small"
                       variant="outlined"
@@ -567,7 +559,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                   )}
 
                   {/* Delete Post Button (Author or Teacher) */}
-                  {(post.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                  {(isTeacher || (!!post.author_id && post.author_id === user?.id)) && (
                     <Button
                       size="small"
                       variant="outlined"
@@ -695,10 +687,10 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                               fontWeight: 800,
                             }}
                           >
-                            {reply.is_anonymous ? <MasksIcon sx={{ fontSize: 16 }} /> : reply.author_display_name[0]}
+                            {reply.is_anonymous ? <MasksIcon sx={{ fontSize: 16 }} /> : reply.author_display_name?.[0] || '?'}
                           </Avatar>
                           <Typography variant="subtitle2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
-                            {reply.author_display_name}
+                            {reply.author_display_name || 'Anonymous'}
                           </Typography>
                           {reply.author_role === 'teacher' && (
                             <Chip
@@ -751,7 +743,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                           </IconButton>
 
                           {/* Edit Reply Button (Author or Teacher) */}
-                          {(reply.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                          {(isTeacher || (!!reply.author_id && reply.author_id === user?.id)) && (
                             <Tooltip title="Edit this reply">
                               <IconButton
                                 size="small"
@@ -765,7 +757,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                           )}
 
                           {/* Delete Reply Button (Author or Teacher) */}
-                          {(reply.author_id === user?.id || currentUserRole === 'teacher' || user?.role === 'teacher') && (
+                          {(isTeacher || (!!reply.author_id && reply.author_id === user?.id)) && (
                             <Tooltip title="Delete this reply">
                               <IconButton
                                 size="small"

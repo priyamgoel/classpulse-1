@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/rateLimit');
 const { validateAndMarkAttendance } = require('../services/qrTokenService');
 
 const router = express.Router();
@@ -138,31 +139,32 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
 
     const totalSessions = sessionsResult.rows.length;
 
-    // 2. Per-student attendance breakdown
+    // 2. Per-student attendance breakdown. Only sessions held after the
+    // student enrolled count toward their denominator.
     const studentsResult = await db.query(
       `SELECT u.id as student_id, u.full_name, u.email, en.joined_at,
               COUNT(ar.id)::int as attended_sessions,
               CASE
-                WHEN $2::int > 0 THEN
-                  ROUND((COUNT(ar.id)::numeric / $2::numeric) * 100, 1)::float
-                ELSE 100.0
+                WHEN COUNT(DISTINCT s.id) > 0 THEN
+                  ROUND((COUNT(ar.id)::numeric / COUNT(DISTINCT s.id)::numeric) * 100, 1)::float
+                ELSE 0
               END as attendance_percentage,
               MAX(ar.validated_at) as last_attendance_at,
               ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1)::float as avg_acl_ms
        FROM enrollments en
        JOIN users u ON en.student_id = u.id
-       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id
+       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id AND s.started_at >= en.joined_at
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = u.id
        WHERE en.classroom_id = $1
        GROUP BY u.id, u.full_name, u.email, en.joined_at
        ORDER BY u.full_name ASC`,
-      [classroomId, totalSessions]
+      [classroomId]
     );
 
     // 3. Aggregate statistics
     const totalEnrolled = studentsResult.rows.length;
-    let avgAttendancePercentage = 100.0;
-    if (totalEnrolled > 0 && totalSessions > 0) {
+    let avgAttendancePercentage = 0;
+    if (totalEnrolled > 0) {
       const sum = studentsResult.rows.reduce((acc, s) => acc + parseFloat(s.attendance_percentage || 0), 0);
       avgAttendancePercentage = Math.round((sum / totalEnrolled) * 10) / 10;
     }
@@ -209,6 +211,14 @@ router.get('/classroom/:id/student/:studentId', authenticateToken, requireRole('
     const studentInfo = await db.query('SELECT id, full_name, email FROM users WHERE id = $1', [studentId]);
     if (studentInfo.rows.length === 0) {
       return res.status(404).json({ error: 'Student not found' });
+    }
+
+    const enrollment = await db.query(
+      'SELECT id FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      [classroomId, studentId]
+    );
+    if (enrollment.rows.length === 0) {
+      return res.status(400).json({ error: 'Student is not enrolled in this classroom' });
     }
 
     // List all sessions for this classroom and whether this student attended
@@ -272,13 +282,13 @@ router.get('/me', authenticateToken, requireRole('student'), async (req, res) =>
               CASE
                 WHEN COUNT(DISTINCT s.id) > 0 THEN
                   ROUND((COUNT(DISTINCT ar.id)::numeric / COUNT(DISTINCT s.id)::numeric) * 100, 1)::float
-                ELSE 100.0
+                ELSE 0
               END as attendance_percentage
        FROM enrollments en
        JOIN classrooms c ON en.classroom_id = c.id
        JOIN courses co ON c.course_id = co.id
        JOIN users u ON c.teacher_id = u.id
-       LEFT JOIN sessions s ON s.classroom_id = c.id
+       LEFT JOIN sessions s ON s.classroom_id = c.id AND s.started_at >= en.joined_at
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = $1
        WHERE en.student_id = $1
        GROUP BY c.id, co.course_code, co.course_name, c.section_name, u.full_name
@@ -297,7 +307,7 @@ router.get('/me', authenticateToken, requireRole('student'), async (req, res) =>
     const overallPercentage =
       totalAllSessions > 0
         ? Math.round((totalAllAttended / totalAllSessions) * 1000) / 10
-        : 100.0;
+        : 0;
 
     res.json({
       overall: {
@@ -430,10 +440,27 @@ router.get('/classroom/:id/export', authenticateToken, requireRole('teacher'), a
 });
 
 // POST /attendance/classroom/:id/send-warnings — Teacher dispatches email warnings to students < 75%
-router.post('/classroom/:id/send-warnings', authenticateToken, requireRole('teacher'), async (req, res) => {
+router.post(
+  '/classroom/:id/send-warnings',
+  authenticateToken,
+  requireRole('teacher'),
+  rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 3,
+    message: 'Too many warning email requests. Try again later.',
+  }),
+  async (req, res) => {
   try {
     const classroomId = req.params.id;
-    const threshold = parseFloat(req.body.threshold || '75.0');
+
+    const rawThreshold = req.body.threshold;
+    const threshold =
+      rawThreshold === undefined || rawThreshold === null || rawThreshold === ''
+        ? 75
+        : Number(rawThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+      return res.status(400).json({ error: 'threshold must be a number between 0 and 100' });
+    }
 
     // Check ownership and classroom details
     const classCheck = await db.query(
@@ -462,20 +489,32 @@ router.post('/classroom/:id/send-warnings', authenticateToken, requireRole('teac
       return res.status(400).json({ error: 'Cannot send warnings: No sessions conducted yet.' });
     }
 
-    // Enrolled students with attendance percentage
+    // Enrolled students with attendance percentage. The denominator is the
+    // number of sessions held since *that student* enrolled, not every session
+    // the classroom ever had.
     const studentsRes = await db.query(
       `SELECT u.id as student_id, u.full_name, u.email,
+              COUNT(DISTINCT s.id)::int as total_sessions,
               COUNT(ar.id)::int as attended_sessions,
-              ROUND((COUNT(ar.id)::numeric / $2::numeric) * 100, 1)::float as attendance_percentage
+              CASE
+                WHEN COUNT(DISTINCT s.id) > 0 THEN
+                  ROUND((COUNT(ar.id)::numeric / COUNT(DISTINCT s.id)::numeric) * 100, 1)::float
+                ELSE 0
+              END as attendance_percentage
        FROM enrollments en
        JOIN users u ON en.student_id = u.id
-       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id
+       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id AND s.started_at >= en.joined_at
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = u.id
        WHERE en.classroom_id = $1
        GROUP BY u.id, u.full_name, u.email
-       HAVING ROUND((COUNT(ar.id)::numeric / $2::numeric) * 100, 1)::float < $3
+       HAVING COUNT(DISTINCT s.id) > 0
+          AND CASE
+                WHEN COUNT(DISTINCT s.id) > 0 THEN
+                  ROUND((COUNT(ar.id)::numeric / COUNT(DISTINCT s.id)::numeric) * 100, 1)::float
+                ELSE 0
+              END < $2
        ORDER BY u.full_name ASC`,
-      [classroomId, totalSessions, threshold]
+      [classroomId, threshold]
     );
 
     const lowAttendanceStudents = studentsRes.rows;
@@ -500,7 +539,7 @@ router.post('/classroom/:id/send-warnings', authenticateToken, requireRole('teac
           teacherName: classroom.teacher_name,
           attendancePct: student.attendance_percentage,
           attendedCount: student.attended_sessions,
-          totalCount: totalSessions,
+          totalCount: student.total_sessions,
         });
         dispatched.push({
           student_id: student.student_id,
@@ -543,6 +582,7 @@ router.post('/classroom/:id/send-warnings', authenticateToken, requireRole('teac
     console.error('Error sending attendance warnings:', err);
     res.status(500).json({ error: 'Failed to send attendance warnings: ' + (err.message || 'Internal error') });
   }
-});
+  }
+);
 
 module.exports = router;

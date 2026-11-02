@@ -1,6 +1,14 @@
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_classpulse_12345';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error(
+    '[ClassPulse Auth] JWT_SECRET environment variable is required. ' +
+      'Set it in the environment (or .env) before starting the server.'
+  );
+}
 
 /**
  * Middleware to verify JWT token in Authorization header

@@ -4,6 +4,10 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+const parsedLinkWindow = parseInt(process.env.ATTENDANCE_LINK_WINDOW_HOURS || '12', 10);
+const ATTENDANCE_LINK_WINDOW_HOURS =
+  Number.isFinite(parsedLinkWindow) && parsedLinkWindow >= 0 ? parsedLinkWindow : 12;
+
 /**
  * POST /quizzes
  * Role: Teacher
@@ -242,13 +246,15 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
       return res.status(400).json({ error: 'Cannot launch a quiz with 0 questions' });
     }
 
-    // Section 4b Present-vs-responded resolution
+    // Section 4b Present-vs-responded resolution. Only a session that ended
+    // inside the configured window is recent enough to link.
     const recentSession = await db.query(
       `SELECT id FROM sessions
        WHERE classroom_id = $1 AND ended_at IS NOT NULL
+         AND ended_at > now() - ($2 || ' hours')::interval
        ORDER BY started_at DESC
        LIMIT 1`,
-      [quiz.classroom_id]
+      [quiz.classroom_id, String(ATTENDANCE_LINK_WINDOW_HOURS)]
     );
 
     let attendanceSessionId = null;

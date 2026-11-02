@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -42,9 +43,10 @@ class Classroom {
       teacherName: json['teacher_name'] ?? '',
       joinCode: json['join_code'] ?? '',
       studentCount: json['student_count'] ?? 0,
-      attendanceAvgRate: (json['attendance_avg_rate'] != null)
-          ? (json['attendance_avg_rate'] as num).toDouble()
-          : 100.0,
+      attendanceAvgRate:
+          (json['attendance_avg_rate'] != null)
+              ? (json['attendance_avg_rate'] as num).toDouble()
+              : 100.0,
       quizCount: json['quiz_count'] ?? 0,
       pulsemeterCount: json['pulsemeter_count'] ?? 0,
       openDoubtsCount: json['open_doubts_count'] ?? 0,
@@ -60,19 +62,24 @@ class ClassroomService {
       final token = AuthService.token;
       if (token == null) return [];
 
-      final response = await http.get(
-        Uri.parse('$baseUrl/classrooms/mine'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/classrooms/mine'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List list = data['classrooms'] ?? [];
         return list.map((item) => Classroom.fromJson(item)).toList();
       }
+      return [];
+    } on TimeoutException {
+      debugPrint('Error fetching classrooms: request timed out');
       return [];
     } catch (e) {
       debugPrint('Error fetching classrooms: $e');
@@ -83,49 +90,73 @@ class ClassroomService {
   static Future<Map<String, dynamic>> joinClassroom(String joinCode) async {
     try {
       final token = AuthService.token;
-      if (token == null) return {'success': false, 'error': 'Not authenticated'};
+      if (token == null)
+        return {'success': false, 'error': 'Not authenticated'};
 
-      final response = await http.post(
-        Uri.parse('$baseUrl/classrooms/join'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({'join_code': joinCode}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/classrooms/join'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'join_code': joinCode}),
+          )
+          .timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
         return {'success': true, 'message': data['message']};
       } else {
-        return {'success': false, 'error': data['error'] ?? 'Failed to join classroom'};
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to join classroom',
+        };
       }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'error': 'The server did not respond. Please try again.',
+      };
     } catch (e) {
       return {'success': false, 'error': 'Network error: $e'};
     }
   }
 
-  static Future<Map<String, dynamic>> unenrollFromClassroom(String classroomId) async {
+  static Future<Map<String, dynamic>> unenrollFromClassroom(
+    String classroomId,
+  ) async {
     try {
       final token = AuthService.token;
-      if (token == null) return {'success': false, 'error': 'Not authenticated'};
+      if (token == null)
+        return {'success': false, 'error': 'Not authenticated'};
 
-      final response = await http.delete(
-        Uri.parse('$baseUrl/classrooms/$classroomId/leave'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/classrooms/$classroomId/leave'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
         return {'success': true, 'message': data['message']};
       } else {
-        return {'success': false, 'error': data['error'] ?? 'Failed to unenroll'};
+        return {
+          'success': false,
+          'error': data['error'] ?? 'Failed to unenroll',
+        };
       }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'error': 'The server did not respond. Please try again.',
+      };
     } catch (e) {
       return {'success': false, 'error': 'Network error: $e'};
     }

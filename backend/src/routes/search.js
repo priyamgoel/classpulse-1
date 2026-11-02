@@ -2,13 +2,53 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const { rateLimit } = require('../middleware/rateLimit');
+const { canAccessClassroom, isCourseMember } = require('../utils/access');
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value) {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+const searchRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.SEARCH_RATE_LIMIT_MAX) || 60,
+  message: 'Too many requests. Please try again later.',
+});
+
+function buildAccessPredicate(userIdParam, role) {
+  if (role === 'teacher') {
+    return `(
+      dp.audience_scope = 'APP'
+      OR (dp.audience_scope = 'CLASSROOM' AND dp.classroom_id IN (
+        SELECT id FROM classrooms WHERE teacher_id = ${userIdParam}
+      ))
+      OR (dp.audience_scope = 'COURSE' AND dp.course_id IN (
+        SELECT course_id FROM classrooms WHERE teacher_id = ${userIdParam}
+      ))
+    )`;
+  }
+
+  return `(
+    dp.audience_scope = 'APP'
+    OR (dp.audience_scope = 'CLASSROOM' AND dp.classroom_id IN (
+      SELECT classroom_id FROM enrollments WHERE student_id = ${userIdParam}
+    ))
+    OR (dp.audience_scope = 'COURSE' AND dp.course_id IN (
+      SELECT c.course_id
+      FROM enrollments e
+      JOIN classrooms c ON e.classroom_id = c.id
+      WHERE e.student_id = ${userIdParam}
+    ))
+  )`;
+}
 
 /**
  * GET /search
  * Audience-Scoped Full-Text Search across doubt questions and discussion content.
  * Powered by PostgreSQL tsvector GIN indexing, ts_rank relevance scoring, and ts_headline highlighting.
  */
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', searchRateLimit, authenticateToken, async (req, res) => {
   try {
     const {
       q,
@@ -23,6 +63,38 @@ router.get('/', authenticateToken, async (req, res) => {
 
     if (!q || typeof q !== 'string' || q.trim().length === 0) {
       return res.status(400).json({ error: 'Search query parameter "q" is required.' });
+    }
+
+    for (const [name, value] of [['course_id', course_id], ['classroom_id', classroom_id], ['topic_id', topic_id]]) {
+      if (value !== undefined && !isUuid(value)) {
+        return res.status(400).json({ error: `${name} must be a valid UUID` });
+      }
+    }
+
+    const parsedLimit = Number.parseInt(limit, 10);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 100' });
+    }
+
+    const parsedOffset = Number.parseInt(offset, 10);
+    if (!Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ error: 'offset must be an integer greater than or equal to 0' });
+    }
+
+    // Explicit membership checks give a clear 403 instead of silently returning
+    // an empty result set for courses/classrooms the requester cannot access.
+    if (course_id) {
+      const isMember = await isCourseMember(req.user, course_id);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this course' });
+      }
+    }
+
+    if (classroom_id) {
+      const canAccess = await canAccessClassroom(req.user, classroom_id);
+      if (!canAccess) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this classroom' });
+      }
     }
 
     const cleanQuery = q.trim();
@@ -43,13 +115,17 @@ router.get('/', authenticateToken, async (req, res) => {
       OR c.course_name ILIKE $2
     )`);
 
-    // Audience Scope Filtering
-    if (scope === 'APP') {
-      conditions.push(`dp.audience_scope = 'APP'`);
-    } else if (scope === 'COURSE' && course_id) {
+    // Course filter is applied whenever supplied, even in classroom context.
+    if (course_id) {
       conditions.push(`dp.course_id = $${paramIdx}`);
       params.push(course_id);
       paramIdx++;
+    }
+
+    // Audience Scope / classroom filtering
+    if (scope === 'APP') {
+      conditions.push(`dp.audience_scope = 'APP'`);
+    } else if (scope === 'COURSE') {
       conditions.push(`dp.audience_scope IN ('APP', 'COURSE')`);
     } else if (scope === 'CLASSROOM' && classroom_id) {
       conditions.push(`(dp.classroom_id = $${paramIdx} OR (dp.course_id = (SELECT course_id FROM classrooms WHERE id = $${paramIdx}) AND dp.audience_scope IN ('APP', 'COURSE')))`);
@@ -59,10 +135,6 @@ router.get('/', authenticateToken, async (req, res) => {
       // Default view in classroom context
       conditions.push(`(dp.classroom_id = $${paramIdx} OR dp.audience_scope IN ('APP', 'COURSE'))`);
       params.push(classroom_id);
-      paramIdx++;
-    } else if (course_id) {
-      conditions.push(`(dp.course_id = $${paramIdx} OR dp.audience_scope = 'APP')`);
-      params.push(course_id);
       paramIdx++;
     }
 
@@ -80,17 +152,19 @@ router.get('/', authenticateToken, async (req, res) => {
       paramIdx++;
     }
 
-    // Current user for helpful mark check
+    // Current user: drives both the access predicate and the helpful-mark check.
     const currentUserIdParam = `$${paramIdx}`;
     params.push(req.user.id);
     paramIdx++;
 
+    conditions.push(buildAccessPredicate(currentUserIdParam, req.user.role));
+
     const limitParam = `$${paramIdx}`;
-    params.push(parseInt(limit, 10) || 20);
+    params.push(parsedLimit);
     paramIdx++;
 
     const offsetParam = `$${paramIdx}`;
-    params.push(parseInt(offset, 10) || 0);
+    params.push(parsedOffset);
 
     const query = `
       SELECT dp.id, dp.course_id, dp.classroom_id, dp.topic_id, dp.author_id,
@@ -104,6 +178,7 @@ router.get('/', authenticateToken, async (req, res) => {
              BOOL_OR(dr.is_solution) as has_accepted_solution,
              ts_rank(dp.search_vector, plainto_tsquery('english', $1)) as rank_score,
              ts_headline('english', dp.body, plainto_tsquery('english', $1), 'StartSel=<b>, StopSel=</b>, MaxWords=35, MinWords=15') as headline,
+             COUNT(*) OVER()::int as total_count,
              EXISTS(
                SELECT 1 FROM doubt_helpful_marks dhm
                WHERE dhm.target_type = 'POST' AND dhm.target_id = dp.id AND dhm.user_id = ${currentUserIdParam}
@@ -121,22 +196,29 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const result = await db.query(query, params);
 
-    const results = result.rows.map((post) => {
+    const total = result.rows.length > 0 && result.rows[0].total_count !== undefined
+      ? Number(result.rows[0].total_count)
+      : result.rows.length;
+
+    const results = result.rows.map((row) => {
+      const { total_count, ...post } = row;
       const isAuthor = post.author_id === req.user.id;
       const isTeacher = req.user.role === 'teacher';
+      const canSeeIdentity = isAuthor || isTeacher;
 
       return {
         ...post,
         author_display_name: post.is_anonymous
           ? (post.pseudonym || 'Anonymous Peer')
           : post.author_real_name,
-        author_real_name: (!post.is_anonymous || isAuthor || isTeacher) ? post.author_real_name : null,
+        author_real_name: (!post.is_anonymous || canSeeIdentity) ? post.author_real_name : null,
+        author_id: (!post.is_anonymous || canSeeIdentity) ? post.author_id : null,
       };
     });
 
     res.json({
       query: cleanQuery,
-      total: results.length,
+      total,
       results,
     });
   } catch (err) {

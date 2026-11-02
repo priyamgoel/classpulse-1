@@ -37,11 +37,14 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import HistoryIcon from '@mui/icons-material/History';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
 import { CreatePulseMeterDialog } from './CreatePulseMeterDialog';
 import { LivePulseMeterModal, PulseMeterInfo } from './LivePulseMeterModal';
 import { PulseMeterResultsDialog } from './PulseMeterResultsDialog';
 import { m3Tokens } from '@/theme/tokens';
 import { getAuthHeaders } from '@/lib/authStorage';
+import { apiJson } from '@/lib/api';
 
 interface PulseMeterAuthoringViewProps {
   classroomId: string;
@@ -75,6 +78,17 @@ export interface PulseMeterPastRun {
   avg_score?: number | null;
 }
 
+interface ActivePulseMeterActivity {
+  id: string;
+  activity_type?: 'PULSEMETER' | 'QUIZ';
+  activity_ref_id?: string;
+  pulsemeter_id?: string;
+  title?: string;
+  started_at?: string;
+  type?: 'WORD_CLOUD' | 'MCQ' | 'RATING_SCALE';
+  config?: any;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = ({ classroomId }) => {
@@ -99,6 +113,11 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
   const [activeActivityId, setActiveActivityId] = useState<string | null>(null);
   const [activePulsemeter, setActivePulsemeter] = useState<PulseMeterInfo | null>(null);
 
+  // Stranded ACTIVE PulseMeter recovery
+  const [activePulseActivity, setActivePulseActivity] = useState<ActivePulseMeterActivity | null>(null);
+  const [checkingActive, setCheckingActive] = useState(false);
+  const [endingActive, setEndingActive] = useState(false);
+
   // Delete State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -107,6 +126,7 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
     if (classroomId) {
       fetchPulsemeters();
       fetchPastRuns();
+      checkActiveActivity();
     }
   }, [classroomId]);
 
@@ -148,6 +168,15 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
         setActiveActivityId(data.activity.id);
         setActivePulsemeter({
           id: pm.id,
+          title: pm.title,
+          type: pm.type,
+          config: pm.config,
+        });
+        // Keep the activity id so "Minimize Window" leaves a resumable banner.
+        setActivePulseActivity({
+          id: data.activity.id,
+          activity_type: 'PULSEMETER',
+          activity_ref_id: pm.id,
           title: pm.title,
           type: pm.type,
           config: pm.config,
@@ -202,6 +231,94 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
       setError('Network error fetching past PulseMeter runs');
     } finally {
       setLoadingPastRuns(false);
+    }
+  };
+
+  const checkActiveActivity = async () => {
+    if (!classroomId) return;
+    setCheckingActive(true);
+    try {
+      const { res, data } = await apiJson<{
+        active?: boolean;
+        activity?: ActivePulseMeterActivity | null;
+        pulsemeter?: { id?: string; title?: string; type?: 'WORD_CLOUD' | 'MCQ' | 'RATING_SCALE'; config?: any } | null;
+        error?: string;
+      }>(`/live-activities/active?classroom_id=${classroomId}`);
+
+      if (res.ok) {
+        const activity = data?.active ? data?.activity : null;
+        if (activity && (!activity.activity_type || activity.activity_type === 'PULSEMETER')) {
+          // `/live-activities/active` nests the PulseMeter payload inside the
+          // activity object; accept the legacy top-level field too.
+          const activityPayload = activity as ActivePulseMeterActivity & {
+            pulsemeter?: { id?: string; title?: string; type?: 'WORD_CLOUD' | 'MCQ' | 'RATING_SCALE'; config?: any } | null;
+          };
+          const info = activityPayload.pulsemeter || data?.pulsemeter || null;
+          setActivePulseActivity({
+            ...activity,
+            title: activity.title || info?.title,
+            type: info?.type || activity.type,
+            config: info?.config || activity.config,
+            pulsemeter_id: info?.id || activity.activity_ref_id,
+          });
+        } else {
+          setActivePulseActivity(null);
+        }
+      }
+    } catch {
+      // Non-blocking: the Library remains usable if active-check fails.
+    } finally {
+      setCheckingActive(false);
+    }
+  };
+
+  const handleResumeActivePulseMeter = () => {
+    if (!activePulseActivity) return;
+    const refId =
+      activePulseActivity.activity_ref_id ||
+      activePulseActivity.pulsemeter_id ||
+      '';
+    const found = pulsemeters.find((pm) => pm.id === refId);
+    const type = activePulseActivity.type || found?.type;
+    const config = activePulseActivity.config || found?.config;
+    const title = activePulseActivity.title || found?.title || 'Untitled PulseMeter';
+
+    if (!type || !config) {
+      setError(
+        'Could not load the PulseMeter definition for the live session. End the live activity to unblock new launches.'
+      );
+      return;
+    }
+
+    setActiveActivityId(activePulseActivity.id);
+    setActivePulsemeter({
+      id: refId,
+      title,
+      type,
+      config,
+    });
+    setActiveActivityModalOpen(true);
+  };
+
+  const handleEndActivePulseMeter = async () => {
+    if (!activePulseActivity) return;
+    setEndingActive(true);
+    setError(null);
+    try {
+      const { res, data } = await apiJson<{ error?: string }>(
+        `/live-activities/${activePulseActivity.id}/end`,
+        { method: 'POST' }
+      );
+      if (res.ok) {
+        setActivePulseActivity(null);
+        await Promise.all([fetchPulsemeters(), fetchPastRuns()]);
+      } else {
+        setError(data?.error || 'Failed to end the active PulseMeter session');
+      }
+    } catch {
+      setError('Network error ending the active PulseMeter session');
+    } finally {
+      setEndingActive(false);
     }
   };
 
@@ -330,6 +447,7 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
             onClick={() => {
               fetchPulsemeters();
               fetchPastRuns();
+              checkActiveActivity();
             }}
             title="Refresh PulseMeters"
           >
@@ -337,6 +455,43 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
           </IconButton>
         </Stack>
       </Stack>
+
+      {activePulseActivity && !activeActivityModalOpen && (
+        <Alert
+          severity="warning"
+          icon={<WarningAmberIcon />}
+          sx={{ mb: 3, borderRadius: '8px', alignItems: 'center' }}
+          action={
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button
+                color="inherit"
+                size="small"
+                variant="outlined"
+                startIcon={<PlayArrowIcon />}
+                onClick={handleResumeActivePulseMeter}
+                disabled={checkingActive}
+                sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+              >
+                Resume
+              </Button>
+              <Button
+                color="error"
+                size="small"
+                variant="contained"
+                startIcon={endingActive ? <CircularProgress size={14} color="inherit" /> : <StopCircleIcon />}
+                onClick={handleEndActivePulseMeter}
+                disabled={endingActive}
+                sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+              >
+                {endingActive ? 'Ending...' : 'End it'}
+              </Button>
+            </Stack>
+          }
+        >
+          <strong>A PulseMeter session is still live</strong> — &quot;
+          {activePulseActivity.title || 'Untitled PulseMeter'}&quot; is blocking new launches. Resume it or end it.
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 3, borderRadius: '8px' }}>
@@ -707,6 +862,7 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
             setActiveActivityModalOpen(false);
             setActiveActivityId(null);
             setActivePulsemeter(null);
+            setActivePulseActivity(null);
             fetchPulsemeters();
             fetchPastRuns();
           }}

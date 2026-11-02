@@ -3,6 +3,7 @@ import 'services/auth_service.dart';
 import 'services/classroom_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
+import 'screens/teacher_web_notice_screen.dart';
 import 'screens/qr_scanner_screen.dart';
 import 'screens/attendance_dashboard_screen.dart';
 import 'screens/pulsemeter_student_view.dart';
@@ -70,25 +71,28 @@ class _ClassPulseAppState extends State<ClassPulseApp> {
           elevation: 0,
         ),
       ),
-      home: !_isAuthenticated
-          ? (_showSignup
-              ? SignupScreen(
-                  onSignupSuccess: _onAuthenticated,
-                  onNavigateToLogin: () {
-                    setState(() {
-                      _showSignup = false;
-                    });
-                  },
-                )
-              : LoginScreen(
-                  onLoginSuccess: _onAuthenticated,
-                  onNavigateToSignup: () {
-                    setState(() {
-                      _showSignup = true;
-                    });
-                  },
-                ))
-          : ClassPulseMainHost(onLogout: _onLogout),
+      home:
+          !_isAuthenticated
+              ? (_showSignup
+                  ? SignupScreen(
+                    onSignupSuccess: _onAuthenticated,
+                    onNavigateToLogin: () {
+                      setState(() {
+                        _showSignup = false;
+                      });
+                    },
+                  )
+                  : LoginScreen(
+                    onLoginSuccess: _onAuthenticated,
+                    onNavigateToSignup: () {
+                      setState(() {
+                        _showSignup = true;
+                      });
+                    },
+                  ))
+              : AuthService.currentUser?.role == 'teacher'
+              ? TeacherWebNoticeScreen(onLogout: _onLogout)
+              : ClassPulseMainHost(onLogout: _onLogout),
     );
   }
 }
@@ -114,10 +118,12 @@ class _ClassPulseMainHostState extends State<ClassPulseMainHost> {
         currentBody = const AttendanceDashboardScreen();
         break;
       case 2:
-        currentBody = const PulseMeterStudentView();
+        currentBody = const PulseMeterStudentView(
+          mode: LiveActivityMode.pulsemeter,
+        );
         break;
       case 3:
-        currentBody = const PulseMeterStudentView();
+        currentBody = const PulseMeterStudentView(mode: LiveActivityMode.quiz);
         break;
       case 4:
         currentBody = const DoubtForumScreen();
@@ -152,7 +158,8 @@ class ClassroomsHomeView extends StatefulWidget {
   State<ClassroomsHomeView> createState() => _ClassroomsHomeViewState();
 }
 
-class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTickerProviderStateMixin {
+class _ClassroomsHomeViewState extends State<ClassroomsHomeView>
+    with SingleTickerProviderStateMixin {
   late TabController _detailTabController;
   List<Classroom> _classrooms = [];
   bool _isLoading = true;
@@ -182,16 +189,14 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
   void _openJoinDialog() {
     showDialog(
       context: context,
-      builder: (ctx) => JoinClassroomDialog(
-        onSuccess: _loadClassrooms,
-      ),
+      builder: (ctx) => JoinClassroomDialog(onSuccess: _loadClassrooms),
     );
   }
 
   void _openScannerScreen() async {
-    final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const QrScannerScreen()),
-    );
+    final result = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => const QrScannerScreen()));
 
     if (result == true) {
       _loadClassrooms();
@@ -220,7 +225,10 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
       appBar: AppBar(
         title: Row(
           children: [
-            const Text('ClassPulse', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              'ClassPulse',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -229,8 +237,12 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                 borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
               ),
               child: const Text(
-                'Iteration 1',
-                style: TextStyle(fontSize: 10, color: M3Tokens.onSecondaryContainer, fontWeight: FontWeight.bold),
+                'Release 1.0',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: M3Tokens.onSecondaryContainer,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -257,17 +269,17 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                   Text(
                     'Welcome, ${user?.fullName ?? "User"}!',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: M3Tokens.onSurface,
-                        ),
+                      fontWeight: FontWeight.bold,
+                      color: M3Tokens.onSurface,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     'Role: ${user?.role.toUpperCase() ?? "STUDENT"}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: M3Tokens.secondary,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      color: M3Tokens.secondary,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ],
               ),
@@ -301,7 +313,9 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                               'Aim camera at the rotating 3-QR stream on the projector.',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: M3Tokens.onPrimaryContainer.withValues(alpha: 0.8),
+                                color: M3Tokens.onPrimaryContainer.withValues(
+                                  alpha: 0.8,
+                                ),
                               ),
                             ),
                           ],
@@ -325,8 +339,8 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                   Text(
                     'Enrolled Classrooms',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   if (user?.role == 'student')
                     FilledButton.tonalIcon(
@@ -345,8 +359,10 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
               else if (_classrooms.isEmpty)
                 EmptyStateWidget(
                   title: 'No Classrooms Enrolled',
-                  description: 'Ask your instructor for a 6-character join code to join a classroom section.',
-                  actionLabel: user?.role == 'student' ? 'Join Classroom' : null,
+                  description:
+                      'Ask your instructor for a 6-character join code to join a classroom section.',
+                  actionLabel:
+                      user?.role == 'student' ? 'Join Classroom' : null,
                   onAction: user?.role == 'student' ? _openJoinDialog : null,
                 )
               else
@@ -377,65 +393,108 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                       showModalBottomSheet(
                         context: context,
                         shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                        ),
-                        builder: (ctx) => SafeArea(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(height: 8),
-                              Container(
-                                width: 40,
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: M3Tokens.outlineVariant,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              ListTile(
-                                leading: const Icon(Icons.exit_to_app, color: Colors.red),
-                                title: const Text('Unenroll from Section', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                                subtitle: Text('${c.courseCode}: ${c.sectionName}'),
-                                onTap: () async {
-                                  final messenger = ScaffoldMessenger.of(context);
-                                  Navigator.pop(ctx);
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (dctx) => AlertDialog(
-                                      title: const Text('Unenroll?', style: TextStyle(fontWeight: FontWeight.bold)),
-                                      content: Text(
-                                        'Are you sure you want to unenroll from ${c.courseCode}: ${c.courseName} (${c.sectionName})?\n\nYour past attendance records will be retained.',
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.pop(dctx, false),
-                                          child: const Text('Cancel'),
-                                        ),
-                                        FilledButton(
-                                          style: FilledButton.styleFrom(backgroundColor: Colors.red),
-                                          onPressed: () => Navigator.pop(dctx, true),
-                                          child: const Text('Unenroll'),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                  if (confirm == true && mounted) {
-                                    final result = await ClassroomService.unenrollFromClassroom(c.id);
-                                    messenger.showSnackBar(
-                                      SnackBar(
-                                        backgroundColor: result['success'] ? Colors.green : Colors.red,
-                                        content: Text(result['success'] ? result['message'] : result['error']),
-                                      ),
-                                    );
-                                    if (result['success'] && mounted) _loadClassrooms();
-                                  }
-                                },
-                              ),
-                              const SizedBox(height: 8),
-                            ],
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(16),
                           ),
                         ),
+                        builder:
+                            (ctx) => SafeArea(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(height: 8),
+                                  Container(
+                                    width: 40,
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: M3Tokens.outlineVariant,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ListTile(
+                                    leading: const Icon(
+                                      Icons.exit_to_app,
+                                      color: Colors.red,
+                                    ),
+                                    title: const Text(
+                                      'Unenroll from Section',
+                                      style: TextStyle(
+                                        color: Colors.red,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      '${c.courseCode}: ${c.sectionName}',
+                                    ),
+                                    onTap: () async {
+                                      final messenger = ScaffoldMessenger.of(
+                                        context,
+                                      );
+                                      Navigator.pop(ctx);
+                                      final confirm = await showDialog<bool>(
+                                        context: context,
+                                        builder:
+                                            (dctx) => AlertDialog(
+                                              title: const Text(
+                                                'Unenroll?',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                              content: Text(
+                                                'Are you sure you want to unenroll from ${c.courseCode}: ${c.courseName} (${c.sectionName})?\n\nYour past attendance records will be retained.',
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed:
+                                                      () => Navigator.pop(
+                                                        dctx,
+                                                        false,
+                                                      ),
+                                                  child: const Text('Cancel'),
+                                                ),
+                                                FilledButton(
+                                                  style: FilledButton.styleFrom(
+                                                    backgroundColor: Colors.red,
+                                                  ),
+                                                  onPressed:
+                                                      () => Navigator.pop(
+                                                        dctx,
+                                                        true,
+                                                      ),
+                                                  child: const Text('Unenroll'),
+                                                ),
+                                              ],
+                                            ),
+                                      );
+                                      if (confirm == true && mounted) {
+                                        final result =
+                                            await ClassroomService.unenrollFromClassroom(
+                                              c.id,
+                                            );
+                                        messenger.showSnackBar(
+                                          SnackBar(
+                                            backgroundColor:
+                                                result['success']
+                                                    ? Colors.green
+                                                    : Colors.red,
+                                            content: Text(
+                                              result['success']
+                                                  ? result['message']
+                                                  : result['error'],
+                                            ),
+                                          ),
+                                        );
+                                        if (result['success'] && mounted)
+                                          _loadClassrooms();
+                                      }
+                                    },
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                              ),
+                            ),
                       );
                     },
                     child: card,
@@ -447,9 +506,16 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Row(
                     children: [
-                      const Icon(Icons.info_outline, size: 13, color: Colors.grey),
+                      const Icon(
+                        Icons.info_outline,
+                        size: 13,
+                        color: Colors.grey,
+                      ),
                       const SizedBox(width: 4),
-                      Text('Long-press a card to unenroll', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                      Text(
+                        'Long-press a card to unenroll',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                      ),
                     ],
                   ),
                 ),
@@ -466,7 +532,11 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                   children: [
                     const Text(
                       'RESERVED TAB STRIP HOOK (SPEC SECTION 7)',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: M3Tokens.secondary),
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: M3Tokens.secondary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TabBar(
@@ -486,16 +556,29 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView> with SingleTick
                       },
                     ),
                     const SizedBox(height: 16),
-                    if (_detailTabController.index == 1 || _detailTabController.index == 2)
-                      PulseMeterStudentView(initialClassroomId: _selectedClassroomId)
+                    if (_detailTabController.index == 1)
+                      PulseMeterStudentView(
+                        initialClassroomId: _selectedClassroomId,
+                        mode: LiveActivityMode.pulsemeter,
+                      )
+                    else if (_detailTabController.index == 2)
+                      PulseMeterStudentView(
+                        initialClassroomId: _selectedClassroomId,
+                        mode: LiveActivityMode.quiz,
+                      )
                     else if (_detailTabController.index == 3)
                       DoubtForumScreen(initialClassroomId: _selectedClassroomId)
                     else
                       EmptyStateWidget(
                         title: 'Live Attendance Scanner',
-                        description: 'Tap below to launch the multi-frame 3-QR camera scanner.',
-                        actionLabel: user?.role == 'student' ? 'Scan Attendance QR' : null,
-                        onAction: user?.role == 'student' ? _openScannerScreen : null,
+                        description:
+                            'Tap below to launch the multi-frame 3-QR camera scanner.',
+                        actionLabel:
+                            user?.role == 'student'
+                                ? 'Scan Attendance QR'
+                                : null,
+                        onAction:
+                            user?.role == 'student' ? _openScannerScreen : null,
                       ),
                   ],
                 ),
@@ -519,7 +602,10 @@ class ProfileView extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('User Profile', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        title: const Text(
+          'User Profile',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
@@ -530,19 +616,32 @@ class ProfileView extends StatelessWidget {
                 radius: 40,
                 backgroundColor: M3Tokens.primary,
                 child: Text(
-                  user?.fullName.isNotEmpty == true ? user!.fullName[0].toUpperCase() : 'U',
-                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+                  user?.fullName.isNotEmpty == true
+                      ? user!.fullName[0].toUpperCase()
+                      : 'U',
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
             Text(
               user?.fullName ?? 'User Name',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: M3Tokens.onSurface),
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: M3Tokens.onSurface,
+              ),
             ),
             Text(
               user?.email ?? '',
-              style: const TextStyle(fontSize: 14, color: M3Tokens.onSurfaceVariant),
+              style: const TextStyle(
+                fontSize: 14,
+                color: M3Tokens.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -553,7 +652,11 @@ class ProfileView extends StatelessWidget {
               ),
               child: Text(
                 'ROLE: ${user?.role.toUpperCase() ?? "STUDENT"}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: M3Tokens.onSecondaryContainer),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                  color: M3Tokens.onSecondaryContainer,
+                ),
               ),
             ),
             const SizedBox(height: 32),
@@ -561,12 +664,21 @@ class ProfileView extends StatelessWidget {
             const SizedBox(height: 16),
             ListTile(
               leading: const Icon(Icons.info_outline, color: M3Tokens.primary),
-              title: const Text('ClassPulse Version', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Iteration 1 (Pilot Release 0.1.0)'),
+              title: const Text(
+                'ClassPulse Version',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text('Release 1.0.0'),
             ),
             ListTile(
-              leading: const Icon(Icons.shield_outlined, color: M3Tokens.primary),
-              title: const Text('Appearance Mode', style: TextStyle(fontWeight: FontWeight.w600)),
+              leading: const Icon(
+                Icons.shield_outlined,
+                color: M3Tokens.primary,
+              ),
+              title: const Text(
+                'Appearance Mode',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
               subtitle: const Text('Strict Light Mode Only'),
             ),
             const Spacer(),
@@ -575,7 +687,13 @@ class ProfileView extends StatelessWidget {
               child: FilledButton.tonalIcon(
                 onPressed: onLogout,
                 icon: const Icon(Icons.logout, color: M3Tokens.error),
-                label: const Text('Sign Out', style: TextStyle(color: M3Tokens.error, fontWeight: FontWeight.bold)),
+                label: const Text(
+                  'Sign Out',
+                  style: TextStyle(
+                    color: M3Tokens.error,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
           ],

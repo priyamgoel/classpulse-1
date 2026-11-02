@@ -38,6 +38,8 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { QRCodeSVG } from 'qrcode.react';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthToken } from '@/lib/authStorage';
+import { apiFetch, readJson } from '@/lib/api';
 
 export interface LiveSession {
   id: string;
@@ -100,9 +102,12 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const [rotationSpeedMs, setRotationSpeedMs] = useState<number>(800); // 800ms (Default), 300ms (Fast), 100ms (Ultra-Fast)
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [socketError, setSocketError] = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const rosterIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const rotationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Live session elapsed timer
@@ -132,11 +137,26 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   useEffect(() => {
     if (!open || !session) return;
 
-    const socket = io(API_BASE_URL);
+    const socket = io(API_BASE_URL, {
+      auth: { token: getAuthToken() },
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('join_session', session.id);
+      setSocketError(null);
+      socket.emit('join_session', session.id, (result: { ok?: boolean; error?: string } | undefined) => {
+        if (!result?.ok) {
+          setSocketError(result?.error || 'The server denied access to this session room. Live updates may be delayed.');
+        }
+      });
+    });
+
+    socket.on('connect_error', (err: Error) => {
+      setSocketError(`Live updates disconnected: ${err.message}`);
+    });
+
+    socket.on('auth:error', (data: { error?: string } | undefined) => {
+      setSocketError(data?.error || 'Socket authentication failed. Please sign in again.');
     });
 
     socket.on('attendance:marked', (data: any) => {
@@ -158,9 +178,15 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     fetchRoster(session.id);
     fetchActiveTokens(session.id);
 
+    // The server reuses each token batch for 8s, so poll at the same cadence.
     fetchIntervalRef.current = setInterval(() => {
       fetchActiveTokens(session.id);
-    }, 3000);
+    }, 8000);
+
+    // Roster fallback poll: keeps attendance moving even if the socket drops.
+    rosterIntervalRef.current = setInterval(() => {
+      fetchRoster(session.id);
+    }, 5000);
 
     return () => {
       if (socketRef.current) {
@@ -168,6 +194,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         socketRef.current.disconnect();
       }
       if (fetchIntervalRef.current) clearInterval(fetchIntervalRef.current);
+      if (rosterIntervalRef.current) clearInterval(rosterIntervalRef.current);
       if (rotationIntervalRef.current) clearInterval(rotationIntervalRef.current);
     };
   }, [open, session]);
@@ -189,12 +216,9 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
 
   const fetchRoster = async (sessionId: string) => {
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const res = await fetch(`${API_BASE_URL}/attendance/session/${sessionId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (res.ok && data.attendance) {
+      const res = await apiFetch(`/attendance/session/${sessionId}`);
+      const data = await readJson<{ attendance?: any[] }>(res);
+      if (res.ok && data?.attendance) {
         const mapped: Attendee[] = data.attendance.map((ar: any) => ({
           id: ar.id,
           student: {
@@ -215,16 +239,17 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
 
   const fetchActiveTokens = async (sessionId: string) => {
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/active-tokens`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (res.ok && data.token_batch) {
+      const res = await apiFetch(`/sessions/${sessionId}/active-tokens`);
+      const data = await readJson<{ token_batch?: TokenBatch; error?: string }>(res);
+      if (res.ok && data?.token_batch) {
         setTokenBatch(data.token_batch);
+        setTokenError(null);
+      } else {
+        setTokenError(data?.error || 'Could not generate the QR code stream');
       }
     } catch (err) {
       console.error('Error fetching active tokens:', err);
+      setTokenError('Network error while generating the QR code stream');
     }
   };
 
@@ -233,12 +258,8 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     setEnding(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const res = await fetch(`${API_BASE_URL}/sessions/${session.id}/end`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
+      const res = await apiFetch(`/sessions/${session.id}/end`, { method: 'POST' });
+      const data = await readJson<{ error?: string }>(res);
       if (res.ok) {
         if (isFullscreen) {
           setIsFullscreen(false);
@@ -246,7 +267,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
         onSessionEnded();
         onClose();
       } else {
-        setError(data.error || 'Failed to end session');
+        setError(data?.error || 'Failed to end session');
       }
     } catch {
       setError('Network error ending session');
@@ -315,6 +336,11 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               color="error"
               sx={{ fontWeight: 900, fontSize: '0.75rem', mb: 1.5 }}
             />
+            {socketError && (
+              <Alert severity="warning" sx={{ mb: 1.5, borderRadius: '8px', fontSize: '0.75rem' }}>
+                {socketError}
+              </Alert>
+            )}
             <Typography variant="h5" sx={{ fontWeight: 900, color: m3Tokens.color.onSurface, lineHeight: 1.2, mb: 0.75 }}>
               {session.course_code}
             </Typography>
@@ -418,7 +444,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                 </Typography>
               </Stack>
               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', fontSize: '0.7rem', lineHeight: 1.3 }}>
-                Tokens refresh every 10s. Stream flips frames at {rotationSpeedMs}ms for fast camera capture.
+                Tokens refresh every 8s. Stream flips frames at {rotationSpeedMs}ms for fast camera capture.
               </Typography>
             </Paper>
           </Box>
@@ -463,6 +489,18 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                 fgColor="#000000"
                 bgColor="#FFFFFF"
               />
+            ) : tokenError ? (
+              <Box sx={{ textAlign: 'center', px: 4, maxWidth: 560 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: 'error.main', mb: 1 }}>
+                  QR stream unavailable
+                </Typography>
+                <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2 }}>
+                  {tokenError}
+                </Typography>
+                <Button variant="contained" onClick={() => fetchActiveTokens(session.id)}>
+                  Retry
+                </Button>
+              </Box>
             ) : (
               <CircularProgress size={80} />
             )}
@@ -690,6 +728,12 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
             </Alert>
           )}
 
+          {socketError && (
+            <Alert severity="warning" sx={{ mb: 2, borderRadius: '8px' }} onClose={() => setSocketError(null)}>
+              {socketError}
+            </Alert>
+          )}
+
         <Grid container spacing={3}>
           {/* Left Panel: Rotating 3-QR Stream Projector */}
           <Grid item xs={12} md={7}>
@@ -736,6 +780,18 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                     fgColor="#000000"
                     bgColor="#FFFFFF"
                   />
+                ) : tokenError ? (
+                  <Box sx={{ textAlign: 'center', width: 300, height: 300, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'error.main' }}>
+                      QR stream unavailable
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                      {tokenError}
+                    </Typography>
+                    <Button size="small" variant="contained" onClick={() => fetchActiveTokens(session.id)}>
+                      Retry
+                    </Button>
+                  </Box>
                 ) : (
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 300, height: 300 }}>
                     <CircularProgress />

@@ -1,6 +1,11 @@
 const crypto = require('crypto');
 const db = require('../db');
 
+const PSEUDONYM_SECRET = process.env.PSEUDONYM_SECRET || process.env.JWT_SECRET;
+if (!PSEUDONYM_SECRET) {
+  throw new Error('PSEUDONYM_SECRET (or JWT_SECRET) is required to generate pseudonyms.');
+}
+
 const ADJECTIVES = [
   'Quantum', 'Brave', 'Curious', 'Swift', 'Silent',
   'Nebula', 'Echo', 'Frost', 'Amber', 'Vivid',
@@ -30,8 +35,13 @@ async function getOrAssignPseudonym(userId, courseId) {
     return existing.rows[0].pseudonym;
   }
 
-  // Generate deterministic pseudonym from sha256 hash of userId + courseId
-  const hash = crypto.createHash('sha256').update(`${userId}:${courseId}`).digest('hex');
+  // Generate a deterministic pseudonym from an HMAC of userId + courseId.
+  // The secret prevents anyone who knows the public user/course ids from
+  // recomputing the pseudonym.
+  const hash = crypto
+    .createHmac('sha256', PSEUDONYM_SECRET)
+    .update(`${userId}:${courseId}`)
+    .digest('hex');
   const adjIdx = parseInt(hash.substring(0, 4), 16) % ADJECTIVES.length;
   const nounIdx = parseInt(hash.substring(4, 8), 16) % NOUNS.length;
   const numSuffix = (parseInt(hash.substring(8, 12), 16) % 90) + 10; // 10..99

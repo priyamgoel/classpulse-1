@@ -40,6 +40,7 @@ import { CreateDoubtDialog } from './CreateDoubtDialog';
 import { DoubtDetailModal } from './DoubtDetailModal';
 import { EmptyState } from './EmptyState';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface DoubtForumViewProps {
   courseId: string;
@@ -56,7 +57,7 @@ export interface DoubtPostListItem {
   topic_name?: string;
   course_code: string;
   course_name: string;
-  author_id: string;
+  author_id: string | null;
   author_display_name: string;
   author_real_name?: string | null;
   author_role?: string;
@@ -109,9 +110,8 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
 
   const fetchTopics = async () => {
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/courses/${courseId}/topics`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok && data.topics) {
@@ -125,7 +125,6 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
   const fetchPosts = async (queryOverride?: string) => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       let url = '';
       const effectiveQuery = (queryOverride !== undefined ? queryOverride : searchQuery).trim();
 
@@ -142,7 +141,7 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
       if (sortBy && !effectiveQuery) url += `&sort_by=${sortBy}`;
 
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -163,12 +162,11 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
   const handleToggleHelpful = async (e: React.MouseEvent, postId: string) => {
     e.stopPropagation();
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/doubts/helpful`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ target_type: 'POST', target_id: postId }),
       });
@@ -469,10 +467,10 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
                         fontWeight: 800,
                       }}
                     >
-                      {post.is_anonymous ? <MasksIcon sx={{ fontSize: 14 }} /> : post.author_display_name[0]}
+                      {post.is_anonymous ? <MasksIcon sx={{ fontSize: 14 }} /> : post.author_display_name?.[0] || '?'}
                     </Avatar>
                     <Typography variant="caption" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
-                      {post.author_display_name}
+                      {post.author_display_name || 'Anonymous'}
                     </Typography>
                   </Stack>
 

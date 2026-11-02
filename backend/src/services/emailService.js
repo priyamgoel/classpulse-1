@@ -1,6 +1,34 @@
 const nodemailer = require('nodemailer');
 
 /**
+ * Escapes a value for safe interpolation into HTML text/attribute contexts.
+ */
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Parses either `user@example.com` or `Name <user@example.com>` safely.
+ */
+function parseEmailAddress(value, fallbackName) {
+  const raw = (value || '').trim();
+  if (!raw) return { name: fallbackName, email: '' };
+
+  const match = raw.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (match) {
+    return { name: match[1] || fallbackName, email: match[2].trim() };
+  }
+
+  return { name: fallbackName, email: raw };
+}
+
+/**
  * Sends low attendance warning email to a student via Brevo HTTPS API, Resend HTTPS API, or SMTP.
  */
 async function sendLowAttendanceWarningEmail({
@@ -19,6 +47,19 @@ async function sendLowAttendanceWarningEmail({
   const user = (process.env.SMTP_USER || '').trim();
 
   const subject = `⚠️ [ClassPulse Warning] Low Attendance Alert in ${courseCode} (${attendancePct}%)`;
+
+  // Every interpolated value below is user/DB controlled, so escape it before
+  // it reaches the HTML body.
+  const safe = {
+    studentName: escapeHtml(studentName),
+    courseCode: escapeHtml(courseCode),
+    courseName: escapeHtml(courseName),
+    sectionName: escapeHtml(sectionName),
+    teacherName: escapeHtml(teacherName),
+    attendancePct: escapeHtml(attendancePct),
+    attendedCount: escapeHtml(attendedCount),
+    totalCount: escapeHtml(totalCount),
+  };
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -51,16 +92,16 @@ async function sendLowAttendanceWarningEmail({
           <p>Official Attendance Shortage Advisory</p>
         </div>
         <div class="content">
-          <p>Dear <strong>${studentName}</strong>,</p>
-          <p>This automated advisory is to inform you that your cumulative attendance for <strong>${courseCode} — ${courseName}</strong> has fallen below the mandatory <strong>75%</strong> institutional requirement.</p>
+          <p>Dear <strong>${safe.studentName}</strong>,</p>
+          <p>This automated advisory is to inform you that your cumulative attendance for <strong>${safe.courseCode} — ${safe.courseName}</strong> has fallen below the mandatory <strong>75%</strong> institutional requirement.</p>
           
           <div class="stats-grid">
             <div class="stat-item">
-              <div class="stat-value">${attendancePct}%</div>
+              <div class="stat-value">${safe.attendancePct}%</div>
               <div class="stat-label">Current Rate</div>
             </div>
             <div class="stat-item">
-              <div class="stat-value" style="color: #6750A4;">${attendedCount} / ${totalCount}</div>
+              <div class="stat-value" style="color: #6750A4;">${safe.attendedCount} / ${safe.totalCount}</div>
               <div class="stat-label">Attended Classes</div>
             </div>
           </div>
@@ -68,15 +109,15 @@ async function sendLowAttendanceWarningEmail({
           <table class="info-table">
             <tr>
               <td>Course:</td>
-              <td><strong>${courseCode} — ${courseName}</strong></td>
+              <td><strong>${safe.courseCode} — ${safe.courseName}</strong></td>
             </tr>
             <tr>
               <td>Section:</td>
-              <td>${sectionName}</td>
+              <td>${safe.sectionName}</td>
             </tr>
             <tr>
               <td>Instructor:</td>
-              <td>${teacherName}</td>
+              <td>${safe.teacherName}</td>
             </tr>
             <tr>
               <td>Status:</td>
@@ -117,11 +158,17 @@ Please ensure you attend all upcoming lectures to meet the minimum eligibility c
 -- 
 ClassPulse Academic Notification Platform`;
 
+  const errors = [];
+  let providerConfigured = false;
+
   // 1. Primary: Brevo HTTPS API (Port 443 — sends to any recipient without custom domain requirement)
   if (brevoApiKey) {
+    providerConfigured = true;
     try {
-      const senderEmail = (process.env.BREVO_SENDER_EMAIL || process.env.EMAIL_FROM || 'priyamgoel36@gmail.com').replace(/.*<([^>]+)>.*/, '$1').trim();
-      const senderName = 'ClassPulse Academic Alert';
+      const sender = parseEmailAddress(
+        process.env.BREVO_SENDER_EMAIL || process.env.EMAIL_FROM || 'no-reply@classpulse.edu',
+        'ClassPulse Academic Alert'
+      );
 
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
@@ -132,8 +179,8 @@ ClassPulse Academic Notification Platform`;
         },
         body: JSON.stringify({
           sender: {
-            name: senderName,
-            email: senderEmail,
+            name: sender.name,
+            email: sender.email,
           },
           to: [
             {
@@ -145,6 +192,7 @@ ClassPulse Academic Notification Platform`;
           htmlContent,
           textContent: plainText,
         }),
+        signal: AbortSignal.timeout(10000),
       });
 
       const resData = await response.json();
@@ -155,12 +203,13 @@ ClassPulse Academic Notification Platform`;
       return { messageId: resData.messageId || `brevo_${Date.now()}` };
     } catch (brevoErr) {
       console.error('Error dispatching via Brevo HTTPS API:', brevoErr);
-      throw brevoErr;
+      errors.push(`Brevo: ${brevoErr.message || String(brevoErr)}`);
     }
   }
 
   // 2. Secondary: Resend HTTPS API (Port 443)
   if (resendApiKey) {
+    providerConfigured = true;
     try {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -175,6 +224,7 @@ ClassPulse Academic Notification Platform`;
           text: plainText,
           html: htmlContent,
         }),
+        signal: AbortSignal.timeout(10000),
       });
 
       const resData = await response.json();
@@ -185,7 +235,7 @@ ClassPulse Academic Notification Platform`;
       return { messageId: resData.id || `resend_${Date.now()}` };
     } catch (apiErr) {
       console.error('Error dispatching via Resend HTTPS API:', apiErr);
-      throw apiErr;
+      errors.push(`Resend: ${apiErr.message || String(apiErr)}`);
     }
   }
 
@@ -193,39 +243,58 @@ ClassPulse Academic Notification Platform`;
   const host = (process.env.SMTP_HOST || '').trim();
   const port = parseInt(process.env.SMTP_PORT || '465', 10);
   const pass = (process.env.SMTP_PASS || '').trim().replace(/\s+/g, '');
-  const fromAddress = process.env.EMAIL_FROM || (user ? `"ClassPulse Academic Alert" <${user}>` : '"ClassPulse Academic Alert" <no-reply@classpulse.edu>');
+  const smtpConfigured = Boolean(host && user && pass);
+  const smtpFrom = parseEmailAddress(
+    process.env.EMAIL_FROM || user || 'no-reply@classpulse.edu',
+    'ClassPulse Academic Alert'
+  );
+  const fromAddress = `${smtpFrom.name} <${smtpFrom.email}>`;
+  const rejectUnauthorized =
+    String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || 'true').toLowerCase() !== 'false';
 
-  if (host && user && pass) {
-    const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
+  if (smtpConfigured) {
+    providerConfigured = true;
+    try {
+      const isGmail = host.toLowerCase().includes('gmail') || user.toLowerCase().endsWith('@gmail.com');
 
-    const mailTransporter = nodemailer.createTransport({
-      host: isGmail ? 'smtp.gmail.com' : host,
-      port: isGmail ? 465 : port,
-      secure: isGmail ? true : port === 465,
-      auth: {
-        user,
-        pass,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
+      const mailTransporter = nodemailer.createTransport({
+        host: isGmail ? 'smtp.gmail.com' : host,
+        port: isGmail ? 465 : port,
+        secure: isGmail ? true : port === 465,
+        auth: {
+          user,
+          pass,
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
+        tls: {
+          rejectUnauthorized,
+        },
+      });
 
-    const info = await mailTransporter.sendMail({
-      from: fromAddress,
-      to,
-      subject,
-      text: plainText,
-      html: htmlContent,
-    });
+      const info = await mailTransporter.sendMail({
+        from: fromAddress,
+        to,
+        subject,
+        text: plainText,
+        html: htmlContent,
+      });
 
-    return info;
+      return info;
+    } catch (smtpErr) {
+      console.error('Error dispatching via SMTP:', smtpErr);
+      errors.push(`SMTP: ${smtpErr.message || String(smtpErr)}`);
+    }
   }
 
-  // 4. Fallback: Simulation mode
+  // At least one provider was configured, but all of them failed. Surface a
+  // combined error instead of silently pretending delivery succeeded.
+  if (providerConfigured) {
+    throw new Error(`All configured email providers failed: ${errors.join('; ')}`);
+  }
+
+  // 4. Fallback: Simulation mode (no provider configured at all)
   console.log('--- [EMAIL DISPATCH SIMULATION (No API Key or SMTP configured)] ---');
   console.log(`To: ${to}`);
   console.log(`From: ClassPulse Academic Alert`);
@@ -236,4 +305,5 @@ ClassPulse Academic Notification Platform`;
 
 module.exports = {
   sendLowAttendanceWarningEmail,
+  escapeHtml,
 };

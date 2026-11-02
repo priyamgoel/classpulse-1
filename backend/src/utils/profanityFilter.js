@@ -43,39 +43,70 @@ const LEET_MAP = {
   '+': 't',
 };
 
+// Common inflections that should still match a base offensive term.
+const SUFFIXES = ['s', 'es', 'ed', 'ing', 'er', 'ers', 'y', 'ies'];
+
+function leetToLetters(text) {
+  let mapped = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    mapped += LEET_MAP[ch] || ch;
+  }
+  return mapped;
+}
+
+function collapseRepeats(token) {
+  return token.replace(/(.)\1+/g, '$1');
+}
+
 /**
  * Normalizes a text string by:
  * 1. Lowercasing
  * 2. Translating leetspeak numbers/symbols to letters
- * 3. Collapsing repeated characters (e.g. "fuuuck" -> "fuck")
+ * 3. Splitting on non-alphanumeric separators into tokens
+ * 4. Collapsing repeated characters within each token ("fuuuck" -> "fuck")
  */
 function normalizeText(input) {
-  if (!input || typeof input !== 'string') return '';
-  
-  let text = input.toLowerCase();
-
-  // Leet map replacement
-  let leetCleaned = '';
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    leetCleaned += LEET_MAP[ch] || ch;
+  if (!input || typeof input !== 'string') {
+    return { raw: '', collapsed: '', alphanumericOnly: '', tokens: [] };
   }
 
-  // Collapse consecutive identical characters to at most 1 (e.g. "shiiit" -> "shit", "fuuuuck" -> "fuck")
-  const collapsed = leetCleaned.replace(/(.)\1+/g, '$1');
+  const raw = input.toLowerCase();
+  const mapped = leetToLetters(raw);
+  const tokens = mapped
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map(collapseRepeats);
 
-  // Strip all non-alphanumeric punctuation and spaces
-  const alphanumericOnly = collapsed.replace(/[^a-z0-9]/g, '');
+  // Keep the legacy fields for callers that still inspect them, but derive
+  // them from sanitized tokens so separators never create false positives.
+  // Collapsing the squished form also catches "f.u.u.c.k".
+  const collapsed = tokens.join(' ');
+  const alphanumericOnly = collapseRepeats(tokens.join(''));
 
   return {
-    raw: text,
+    raw,
     collapsed,
     alphanumericOnly,
+    tokens,
   };
+}
+
+function matchOffensiveTerm(candidate) {
+  for (const term of OFFENSIVE_TERMS) {
+    if (candidate === term) return term;
+    for (const suffix of SUFFIXES) {
+      if (candidate === `${term}${suffix}`) return term;
+    }
+  }
+  return null;
 }
 
 /**
  * Check if the text contains offensive or prohibited words.
+ * Matches whole tokens (plus common suffixes) and separator-obfuscated input
+ * such as "f.u.c.k" / "f u c k". Substring matching is intentionally avoided
+ * because it flags innocent words such as "shiitake" or "Scunthorpe".
  * @param {string} text - The input submission string
  * @returns {{ isBlocked: boolean, reason: string | null, matchedWord: string | null }}
  */
@@ -84,27 +115,27 @@ function checkProfanity(text) {
     return { isBlocked: false, reason: null, matchedWord: null };
   }
 
-  const { raw, collapsed, alphanumericOnly } = normalizeText(text);
+  const { tokens, alphanumericOnly } = normalizeText(text);
 
-  // 1. Direct word boundary check on raw and collapsed
-  for (const term of OFFENSIVE_TERMS) {
-    const regex = new RegExp(`(^|\\b|_)${term}($|\\b|_)`, 'i');
-    if (regex.test(raw) || regex.test(collapsed)) {
+  for (const token of tokens) {
+    const matched = matchOffensiveTerm(token);
+    if (matched) {
       return {
         isBlocked: true,
-        reason: `Flagged by profanity filter (matches "${term}")`,
-        matchedWord: term,
+        reason: `Flagged by profanity filter (matches "${matched}")`,
+        matchedWord: matched,
       };
     }
+  }
 
-    // 2. Continuous string check (e.g., student typed "f.u.c.k" or "f u c k" which collapsed to "fuck")
-    if (term.length >= 4 && alphanumericOnly.includes(term)) {
-      return {
-        isBlocked: true,
-        reason: `Flagged by profanity filter (matches "${term}")`,
-        matchedWord: term,
-      };
-    }
+  // Obfuscated input with separators squishes down to a single term.
+  const squishedMatch = matchOffensiveTerm(alphanumericOnly);
+  if (squishedMatch) {
+    return {
+      isBlocked: true,
+      reason: `Flagged by profanity filter (matches "${squishedMatch}")`,
+      matchedWord: squishedMatch,
+    };
   }
 
   return { isBlocked: false, reason: null, matchedWord: null };

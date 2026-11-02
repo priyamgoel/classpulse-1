@@ -2,7 +2,10 @@ const crypto = require('crypto');
 const db = require('../db');
 const { getRedisClient } = require('../redis');
 
-const HMAC_SECRET = process.env.QR_HMAC_SECRET || process.env.JWT_SECRET || 'classpulse_anti_proxy_secret_key_2026';
+const HMAC_SECRET = process.env.QR_HMAC_SECRET;
+if (!HMAC_SECRET) {
+  throw new Error('QR_HMAC_SECRET is required. Refusing to start with a default QR signing secret.');
+}
 const TOKEN_TTL_SECONDS = 15;
 const MAX_TOKEN_AGE_MS = 10000; // 10s freshness window per technical specification
 
@@ -12,12 +15,53 @@ function computeHmac(payloadString) {
 }
 
 /**
- * Generates a signed, timestamped 3-QR token batch for an active session
+ * Generates a signed, timestamped 3-QR token batch for an active session.
+ * Reuses the latest cached batch while it is still within `maxAgeMs` so that
+ * polling `/sessions/:id/active-tokens` does not rotate the QR codes on every
+ * request (which would make scanning impossible for students).
+ *
  * @param {string} sessionId
- * @returns {Promise<{ batch_id: string, timestamp: number, tokens: Array }>}
+ * @param {{ maxAgeMs?: number }} [options]
+ * @returns {Promise<{ batch_id: string, timestamp: number, expires_in_seconds: number, tokens: Array }>}
  */
-async function generate3QrSequence(sessionId) {
+async function generate3QrSequence(sessionId, options = {}) {
   const redis = getRedisClient();
+  const parsedMaxAge = Number(options.maxAgeMs);
+  const maxAgeMs = Number.isFinite(parsedMaxAge) && parsedMaxAge >= 0 ? parsedMaxAge : 8000;
+
+  // Reuse the most recent batch while it is still fresh.
+  const latestBatchId = await redis.get(`session:${sessionId}:latest_batch`);
+  if (latestBatchId) {
+    const cachedRaw = await redis.get(`session:${sessionId}:batch:${latestBatchId}`);
+    if (cachedRaw) {
+      try {
+        const cached = typeof cachedRaw === 'string' ? JSON.parse(cachedRaw) : cachedRaw;
+        const cachedTimestamp = Number(cached && cached.timestamp);
+        const ageMs = Date.now() - cachedTimestamp;
+
+        if (
+          Number.isFinite(cachedTimestamp) &&
+          ageMs >= 0 &&
+          ageMs < maxAgeMs &&
+          Array.isArray(cached.tokens) &&
+          cached.tokens.length === 3
+        ) {
+          return {
+            batch_id: cached.batchId || cached.batch_id || latestBatchId,
+            timestamp: cachedTimestamp,
+            expires_in_seconds: Math.max(
+              0,
+              TOKEN_TTL_SECONDS - Math.floor(ageMs / 1000)
+            ),
+            tokens: cached.tokens,
+          };
+        }
+      } catch (parseErr) {
+        // Corrupt cache entry: fall through and issue a fresh batch.
+      }
+    }
+  }
+
   const batchId = crypto.randomUUID();
   const timestamp = Date.now();
 
@@ -190,17 +234,49 @@ async function validateAndMarkAttendance({ sessionId, tokens, scanStartedAt, stu
     };
   }
 
-  // 10. Parse scan_started_at and calculate Attendance Capture Latency (ACL)
-  const scanStartedDate = scanStartedAt ? new Date(scanStartedAt) : validatedAt;
-  const aclMs = Math.max(0, validatedAt.getTime() - scanStartedDate.getTime());
+  // 10. Parse scan_started_at and calculate Attendance Capture Latency (ACL).
+  // The client-supplied start is untrusted: it may not be in the future, and
+  // it can never make the capture latency smaller than the server-signed token
+  // age (the QR frame cannot have been scanned before it was issued).
+  let scanStartedDate = validatedAt;
+  if (scanStartedAt !== undefined && scanStartedAt !== null) {
+    scanStartedDate = new Date(scanStartedAt);
+    if (Number.isNaN(scanStartedDate.getTime())) {
+      return { valid: false, statusCode: 400, error: 'Invalid scan_started_at' };
+    }
+    if (scanStartedDate.getTime() > validatedAt.getTime() + 2000) {
+      return { valid: false, statusCode: 400, error: 'Invalid scan_started_at' };
+    }
+  }
 
-  // 11. Insert record into attendance_records
-  const insertResult = await db.query(
-    `INSERT INTO attendance_records (session_id, student_id, scan_started_at, validated_at, status)
-     VALUES ($1, $2, $3, $4, 'PRESENT')
-     RETURNING *`,
-    [sessionId, studentId, scanStartedDate.toISOString(), validatedAt.toISOString()]
-  );
+  const effectiveStartMs = Math.max(scanStartedDate.getTime(), tokenTimestamp);
+  const effectiveStart = new Date(effectiveStartMs);
+  const aclMs = Math.max(0, validatedAt.getTime() - effectiveStart.getTime());
+
+  // 11. Insert record into attendance_records. The unique constraint closes the
+  // check-then-insert race between two concurrent scan requests.
+  let insertResult;
+  try {
+    insertResult = await db.query(
+      `INSERT INTO attendance_records (session_id, student_id, scan_started_at, validated_at, status)
+       VALUES ($1, $2, $3, $4, 'PRESENT')
+       RETURNING *`,
+      [sessionId, studentId, effectiveStart.toISOString(), validatedAt.toISOString()]
+    );
+  } catch (insertErr) {
+    if (
+      insertErr &&
+      (insertErr.constraint === 'attendance_records_session_id_student_id_key' ||
+        insertErr.code === '23505')
+    ) {
+      return {
+        valid: false,
+        statusCode: 409,
+        error: 'Conflict: Attendance has already been marked for this student in this session.',
+      };
+    }
+    throw insertErr;
+  }
 
   return {
     valid: true,

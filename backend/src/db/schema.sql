@@ -266,3 +266,28 @@ CREATE INDEX IF NOT EXISTS idx_live_activities_history
   ON live_activities (classroom_id, activity_type, status, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_quiz_responses_activity_student
   ON quiz_responses (live_activity_id, student_id);
+
+-- =========================================================
+-- ITERATION 3: ATTENDANCE, HISTORY & MODERATION INDEXES
+-- =========================================================
+
+CREATE INDEX IF NOT EXISTS idx_attendance_records_student
+  ON attendance_records (student_id);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_classroom_started
+  ON sessions (classroom_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_enrollments_student
+  ON enrollments (student_id);
+
+CREATE INDEX IF NOT EXISTS idx_word_cloud_mutes_student_classroom_until
+  ON word_cloud_mutes (student_id, classroom_id, muted_until);
+
+CREATE INDEX IF NOT EXISTS idx_doubt_helpful_marks_target
+  ON doubt_helpful_marks (target_type, target_id);
+
+CREATE INDEX IF NOT EXISTS idx_doubt_moderation_flags_target
+  ON doubt_moderation_flags (target_type, target_id);
+
+CREATE INDEX IF NOT EXISTS idx_live_activities_attendance_pending
+  ON live_activities (classroom_id) WHERE attendance_pending = TRUE;

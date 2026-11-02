@@ -61,6 +61,8 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { m3Tokens, chartTokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
+import { apiFetch, readJson } from '@/lib/api';
 
 interface AttendanceAnalyticsViewProps {
   classroomId: string;
@@ -100,6 +102,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [classroomInfo, setClassroomInfo] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Export Menu state
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null);
@@ -127,20 +130,27 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
 
   const fetchAnalytics = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
-      const res = await fetch(`${API_BASE_URL}/attendance/classroom/${classroomId}/summary`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStats(data.stats);
+      const res = await apiFetch(`/attendance/classroom/${classroomId}/summary`);
+      const data = await readJson<{
+        stats?: ClassroomStats;
+        students?: StudentStat[];
+        sessions?: SessionRecord[];
+        classroom?: any;
+        error?: string;
+      }>(res);
+      if (res.ok && data) {
+        setStats(data.stats || null);
         setStudents(data.students || []);
         setSessions(data.sessions || []);
         setClassroomInfo(data.classroom || null);
+      } else {
+        setError(data?.error || 'Failed to load attendance analytics');
       }
     } catch (err) {
       console.error('Error fetching analytics:', err);
+      setError('Network error loading attendance analytics');
     } finally {
       setLoading(false);
     }
@@ -150,9 +160,8 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
     setDrilldownStudent(student);
     setLoadingDrilldown(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/attendance/classroom/${classroomId}/student/${student.student_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -170,9 +179,8 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
     setExportAnchorEl(null);
     setIsExporting(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/attendance/classroom/${classroomId}/export?format=${format}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
 
       if (!res.ok) {
@@ -210,12 +218,11 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
     setOverridingSessionId(sessionId);
 
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/attendance/override`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           classroom_id: classroomId,
@@ -261,12 +268,11 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
   const handleSendEmailWarnings = async () => {
     setIsSendingEmails(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/attendance/classroom/${classroomId}/send-warnings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ threshold: 75.0 }),
       });
@@ -303,6 +309,24 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
       </Box>
     );
   }
+
+  if (error) {
+    return (
+      <Alert
+        severity="error"
+        sx={{ borderRadius: '10px', alignItems: 'center' }}
+        action={
+          <Button color="inherit" size="small" onClick={fetchAnalytics} sx={{ textTransform: 'none', fontWeight: 700 }}>
+            Retry
+          </Button>
+        }
+      >
+        <strong>Could not load attendance analytics.</strong> {error}
+      </Alert>
+    );
+  }
+
+  const noSessions = (stats?.total_sessions ?? 0) === 0;
 
   // Process chronological sessions data for Recharts visualizations
   const chronologicalSessions = [...sessions].sort(
@@ -454,11 +478,21 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
               </Typography>
               <TrendingUpIcon sx={{ color: m3Tokens.color.primary, fontSize: 20 }} />
             </Stack>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: (stats?.average_attendance_percentage ?? 0) >= 75 ? 'success.main' : 'warning.main' }}>
-              {stats?.average_attendance_percentage ?? 0}%
+            <Typography
+              variant="h4"
+              sx={{
+                fontWeight: 800,
+                color: noSessions
+                  ? m3Tokens.color.onSurface
+                  : (stats?.average_attendance_percentage ?? 0) >= 75
+                  ? 'success.main'
+                  : 'warning.main',
+              }}
+            >
+              {noSessions ? '—' : `${stats?.average_attendance_percentage ?? 0}%`}
             </Typography>
             <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-              Across {stats?.total_sessions ?? 0} total sessions
+              {noSessions ? 'No sessions yet' : `Across ${stats?.total_sessions ?? 0} total sessions`}
             </Typography>
           </Paper>
         </Grid>
@@ -533,10 +567,10 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
               <FlashOnIcon sx={{ color: 'warning.main', fontSize: 20 }} />
             </Stack>
             <Typography variant="h4" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
-              {stats?.average_acl_ms ? `${stats.average_acl_ms}ms` : '—'}
+              {noSessions || !stats?.average_acl_ms ? '—' : `${stats.average_acl_ms}ms`}
             </Typography>
             <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-              Scan-to-validation speed
+              {noSessions ? 'No sessions yet' : 'Scan-to-validation speed'}
             </Typography>
           </Paper>
         </Grid>
@@ -811,7 +845,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
               <TableBody>
                 {students.map((student) => {
                   const pct = parseFloat(student.attendance_percentage || '0');
-                  const isShortage = pct < 75.0 && (stats?.total_sessions ?? 0) > 0;
+                  const isShortage = pct < 75.0 && !noSessions;
                   return (
                     <TableRow key={student.student_id} hover>
                       <TableCell sx={{ fontWeight: 600, color: m3Tokens.color.onSurface }}>
@@ -830,20 +864,33 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                       <TableCell>
                         <Stack spacing={0.5}>
                           <Stack direction="row" justifyContent="space-between">
-                            <Typography variant="caption" sx={{ fontWeight: 700, color: pct >= 75 ? 'success.main' : 'error.main' }}>
-                              {pct}%
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                fontWeight: 700,
+                                color: noSessions ? m3Tokens.color.onSurfaceVariant : pct >= 75 ? 'success.main' : 'error.main',
+                              }}
+                            >
+                              {noSessions ? '—' : `${pct}%`}
                             </Typography>
                           </Stack>
                           <LinearProgress
                             variant="determinate"
-                            value={Math.min(100, pct)}
-                            color={pct >= 75 ? 'success' : 'error'}
+                            value={noSessions ? 0 : Math.min(100, pct)}
+                            color={noSessions ? 'inherit' : pct >= 75 ? 'success' : 'error'}
                             sx={{ height: 6, borderRadius: '3px' }}
                           />
                         </Stack>
                       </TableCell>
                       <TableCell>
-                        {isShortage ? (
+                        {noSessions ? (
+                          <Chip
+                            label="No sessions yet"
+                            size="small"
+                            variant="outlined"
+                            sx={{ fontWeight: 700, fontSize: '0.7rem' }}
+                          />
+                        ) : isShortage ? (
                           <Chip
                             label="Shortage (<75%)"
                             size="small"

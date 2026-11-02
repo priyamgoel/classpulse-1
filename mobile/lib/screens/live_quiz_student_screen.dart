@@ -103,7 +103,11 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
   bool _initialLoaded = false;
   bool _finished = false;
   bool _unauthorized = false;
+  bool _quizInactive = false;
 
+  String _errorTitle = 'Session expired';
+  String _inactiveMessage =
+      'This quiz is no longer active. It may have ended or been replaced by another activity.';
   String? _errorMessage;
   bool _isRetryable = false;
 
@@ -116,7 +120,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
 
     // The server owns quiz progression; polling keeps the student in sync.
     _pollTimer = Timer.periodic(_pollInterval, (_) {
-      if (!mounted || _finished || _unauthorized) return;
+      if (!mounted || _finished || _unauthorized || _quizInactive) return;
       _fetchActive();
     });
 
@@ -234,8 +238,9 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
 
     final questionId = _asString(current['question_id']);
     if (questionId != null) {
-      final found =
-          _questions.indexWhere((q) => _asString(q['id']) == questionId);
+      final found = _questions.indexWhere(
+        (q) => _asString(q['id']) == questionId,
+      );
       if (found >= 0) return found + 1;
     }
     return 1;
@@ -255,22 +260,26 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _fetchActive() async {
-    if (_isFetchingActive || _finished || _unauthorized) return;
+    if (_isFetchingActive || _finished || _unauthorized || _quizInactive) {
+      return;
+    }
     _isFetchingActive = true;
 
     try {
       final token = AuthService.token;
-      final response = await http.get(
-        Uri.parse(
-          '${AuthService.baseUrl}/live-activities/active?classroom_id=${widget.classroomId}',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      ).timeout(_requestTimeout);
+      final response = await http
+          .get(
+            Uri.parse(
+              '${AuthService.baseUrl}/live-activities/active?classroom_id=${widget.classroomId}',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(_requestTimeout);
 
-      if (!mounted || _finished || _unauthorized) return;
+      if (!mounted || _finished || _unauthorized || _quizInactive) return;
 
       if (response.statusCode == 200) {
         Map<String, dynamic> data = <String, dynamic>{};
@@ -281,19 +290,36 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
         }
 
         if (data['active'] == true && data['activity'] != null) {
-          _applyActivity(_asMap(data['activity']));
+          final activity = _asMap(data['activity']);
+          // The active activity may have changed since this screen opened
+          // (teacher ended the quiz and launched another one). Never apply or
+          // submit answers against a different activity.
+          if (_asString(activity['id']) != widget.activityId) {
+            _markQuizInactive();
+            return;
+          }
+          _applyActivity(activity);
         } else {
           // The teacher ended the activity (or the quiz closed).
           await _finishQuiz();
         }
       } else if (response.statusCode == 401) {
         _markUnauthorized();
+      } else if (response.statusCode == 403) {
+        _markUnauthorized(
+          title: 'Access denied',
+          message:
+              'You no longer have access to this quiz. Please return to the classroom.',
+        );
+      } else if (response.statusCode == 404) {
+        _markQuizInactive(message: 'This quiz is no longer available.');
       } else if (mounted) {
         setState(() {
           _isRetryable = response.statusCode >= 500;
-          _errorMessage = response.statusCode >= 500
-              ? 'The server is temporarily unavailable. Retrying…'
-              : 'Unable to refresh the live quiz (HTTP ${response.statusCode}).';
+          _errorMessage =
+              response.statusCode >= 500
+                  ? 'The server is temporarily unavailable. Retrying…'
+                  : 'Unable to refresh the live quiz (HTTP ${response.statusCode}).';
         });
       }
     } on TimeoutException {
@@ -307,7 +333,8 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
       if (mounted && !_finished) {
         setState(() {
           _isRetryable = true;
-          _errorMessage = 'Network error while refreshing the live quiz. Retrying…';
+          _errorMessage =
+              'Network error while refreshing the live quiz. Retrying…';
         });
       }
     } finally {
@@ -330,13 +357,15 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
       }
     }
 
-    final current = activity['current_question'] == null
-        ? null
-        : _asMap(activity['current_question']);
-    final questionKey = current == null
-        ? null
-        : '${_asString(current['question_id']) ?? ''}:'
-            '${_asInt(current['question_index'], -1)}';
+    final current =
+        activity['current_question'] == null
+            ? null
+            : _asMap(activity['current_question']);
+    final questionKey =
+        current == null
+            ? null
+            : '${_asString(current['question_id']) ?? ''}:'
+                '${_asInt(current['question_index'], -1)}';
     final questionChanged = questionKey != _lastQuestionKey;
 
     if (!mounted) return;
@@ -392,15 +421,17 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
 
     try {
       final token = AuthService.token;
-      final response = await http.get(
-        Uri.parse(
-          '${AuthService.baseUrl}/live-activities/${widget.activityId}/quiz/my-results',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      ).timeout(_requestTimeout);
+      final response = await http
+          .get(
+            Uri.parse(
+              '${AuthService.baseUrl}/live-activities/${widget.activityId}/quiz/my-results',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(_requestTimeout);
 
       if (!mounted) return;
 
@@ -423,9 +454,10 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
         _markUnauthorized();
       } else {
         setState(() {
-          _resultsError = response.statusCode >= 500
-              ? 'The server is temporarily unavailable. Please retry.'
-              : 'Could not load your quiz results (HTTP ${response.statusCode}).';
+          _resultsError =
+              response.statusCode >= 500
+                  ? 'The server is temporarily unavailable. Please retry.'
+                  : 'Could not load your quiz results (HTTP ${response.statusCode}).';
         });
       }
     } on TimeoutException {
@@ -446,15 +478,30 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
     }
   }
 
-  void _markUnauthorized() {
+  void _markUnauthorized({String title = 'Session expired', String? message}) {
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     if (!mounted) return;
     setState(() {
       _unauthorized = true;
       _initialLoaded = true;
+      _errorTitle = title;
       _errorMessage =
+          message ??
           'Your session has expired. Please sign out and log in again.';
+      _isRetryable = false;
+    });
+  }
+
+  void _markQuizInactive({String? message}) {
+    _pollTimer?.cancel();
+    _tickTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _quizInactive = true;
+      _initialLoaded = true;
+      _inactiveMessage = message ?? _inactiveMessage;
+      _errorMessage = null;
       _isRetryable = false;
     });
   }
@@ -480,19 +527,21 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
 
     try {
       final token = AuthService.token;
-      final response = await http.post(
-        Uri.parse(
-          '${AuthService.baseUrl}/live-activities/${widget.activityId}/quiz/answer',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'question_id': questionId,
-          'selected_option_id': optionId,
-        }),
-      ).timeout(_requestTimeout);
+      final response = await http
+          .post(
+            Uri.parse(
+              '${AuthService.baseUrl}/live-activities/${widget.activityId}/quiz/answer',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'question_id': questionId,
+              'selected_option_id': optionId,
+            }),
+          )
+          .timeout(_requestTimeout);
 
       Map<String, dynamic> data = <String, dynamic>{};
       if (response.body.isNotEmpty) {
@@ -542,7 +591,8 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
         setState(() {
           _selectedOptionId = optionId;
           _pendingOptionId = null;
-          _errorMessage = _serverErrorMessage(data) ??
+          _errorMessage =
+              _serverErrorMessage(data) ??
               'Time expired — this question is no longer accepting answers.';
           _isRetryable = false;
         });
@@ -555,7 +605,8 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
         });
       } else {
         setState(() {
-          _errorMessage = _serverErrorMessage(data) ??
+          _errorMessage =
+              _serverErrorMessage(data) ??
               'Could not submit your answer (HTTP ${response.statusCode}).';
           _isRetryable = false;
         });
@@ -620,8 +671,11 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.stars,
-                    size: 16, color: M3Tokens.onPrimaryContainer),
+                const Icon(
+                  Icons.stars,
+                  size: 16,
+                  color: M3Tokens.onPrimaryContainer,
+                ),
                 const SizedBox(width: 4),
                 Text(
                   '$_displayScore pts',
@@ -641,10 +695,23 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
   }
 
   Widget _buildBody() {
+    if (_quizInactive) {
+      return _buildFullMessage(
+        icon: Icons.event_busy,
+        title: 'Quiz no longer active',
+        message: _inactiveMessage,
+        action: FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back, size: 18),
+          label: const Text('Back to classroom'),
+        ),
+      );
+    }
+
     if (_unauthorized) {
       return _buildFullMessage(
         icon: Icons.lock_outline,
-        title: 'Session expired',
+        title: _errorTitle,
         message:
             _errorMessage ?? 'Please sign out and log in again to continue.',
       );
@@ -671,7 +738,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
       case _QuizPhase.error:
         return _buildFullMessage(
           icon: Icons.lock_outline,
-          title: 'Session expired',
+          title: _errorTitle,
           message:
               _errorMessage ?? 'Please sign out and log in again to continue.',
         );
@@ -735,10 +802,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                   fontSize: 13,
                 ),
               ),
-              if (action != null) ...[
-                const SizedBox(height: 20),
-                action,
-              ],
+              if (action != null) ...[const SizedBox(height: 20), action],
             ],
           ),
         ),
@@ -768,10 +832,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
             const Text(
               'This screen updates automatically.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: M3Tokens.onSurfaceVariant,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: M3Tokens.onSurfaceVariant, fontSize: 12),
             ),
             if (_errorMessage != null) ...[
               const SizedBox(height: 20),
@@ -790,17 +851,18 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
     final options = _asMapList(question?['options']);
     final revealed = current['revealed'] == true;
     final correctOptionId = _revealedCorrectOptionId;
-    final answer =
-        questionId == null ? null : _answersByQuestionId[questionId];
+    final answer = questionId == null ? null : _answersByQuestionId[questionId];
     final selectedOptionId =
         _selectedOptionId ?? _asString(answer?['selected_option_id']);
     final remainingMs = _remainingMs;
     final remainingSeconds = (remainingMs / 1000).ceil();
     final durationMs = _questionDurationMs;
-    final progress = durationMs > 0
-        ? (remainingMs / durationMs).clamp(0.0, 1.0).toDouble()
-        : 0.0;
-    final questionText = _asString(question?['question_text']) ??
+    final progress =
+        durationMs > 0
+            ? (remainingMs / durationMs).clamp(0.0, 1.0).toDouble()
+            : 0.0;
+    final questionText =
+        _asString(question?['question_text']) ??
         _asString(current['question_text']) ??
         'Question';
     final answered = questionId != null && _hasAnswered(questionId);
@@ -815,8 +877,10 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: M3Tokens.primary,
                   borderRadius: BorderRadius.circular(8),
@@ -835,9 +899,10 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                   Icon(
                     Icons.timer_outlined,
                     size: 18,
-                    color: remainingSeconds <= 5
-                        ? Colors.red
-                        : M3Tokens.onSurfaceVariant,
+                    color:
+                        remainingSeconds <= 5
+                            ? Colors.red
+                            : M3Tokens.onSurfaceVariant,
                   ),
                   const SizedBox(width: 4),
                   Text(
@@ -845,9 +910,10 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
-                      color: remainingSeconds <= 5
-                          ? Colors.red
-                          : M3Tokens.onSurface,
+                      color:
+                          remainingSeconds <= 5
+                              ? Colors.red
+                              : M3Tokens.onSurface,
                     ),
                   ),
                 ],
@@ -865,8 +931,8 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                 revealed
                     ? M3Tokens.secondary
                     : remainingSeconds <= 5
-                        ? Colors.red
-                        : M3Tokens.primary,
+                    ? Colors.red
+                    : M3Tokens.primary,
               ),
             ),
           ),
@@ -913,8 +979,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
               }
               final optionText = _asString(option['text']) ?? '';
               final isSelected = selectedOptionId == optionId;
-              final isCorrectOption =
-                  revealed && correctOptionId == optionId;
+              final isCorrectOption = revealed && correctOptionId == optionId;
               final isWrongSelection =
                   revealed && isSelected && !isCorrectOption;
               final canTap = _isQuestionOpen && !_isSubmitting;
@@ -937,14 +1002,12 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                 padding: const EdgeInsets.only(bottom: 12.0),
                 child: InkWell(
                   onTap: canTap ? () => _submitAnswer(optionId) : null,
-                  borderRadius:
-                      BorderRadius.circular(M3Tokens.shapeMedium),
+                  borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: cardBg,
-                      borderRadius:
-                          BorderRadius.circular(M3Tokens.shapeMedium),
+                      borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
                       border: Border.all(
                         color: borderColor,
                         width: isSelected ? 2 : 1,
@@ -956,18 +1019,20 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                           width: 32,
                           height: 32,
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? M3Tokens.primary
-                                : Colors.grey.shade100,
+                            color:
+                                isSelected
+                                    ? M3Tokens.primary
+                                    : Colors.grey.shade100,
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
                           child: Text(
                             optionId.toUpperCase(),
                             style: TextStyle(
-                              color: isSelected
-                                  ? Colors.white
-                                  : M3Tokens.onSurface,
+                              color:
+                                  isSelected
+                                      ? Colors.white
+                                      : M3Tokens.onSurface,
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
                             ),
@@ -979,9 +1044,10 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                             optionText,
                             style: TextStyle(
                               fontSize: 15,
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
+                              fontWeight:
+                                  isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
                               color: M3Tokens.onSurface,
                             ),
                           ),
@@ -993,11 +1059,13 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         else if (isCorrectOption)
-                          const Icon(Icons.check_circle,
-                              color: Colors.green, size: 24)
+                          const Icon(
+                            Icons.check_circle,
+                            color: Colors.green,
+                            size: 24,
+                          )
                         else if (isWrongSelection)
-                          const Icon(Icons.cancel,
-                              color: Colors.red, size: 24)
+                          const Icon(Icons.cancel, color: Colors.red, size: 24)
                         else if (isSelected && !revealed)
                           const Icon(
                             Icons.check_circle_outline,
@@ -1035,35 +1103,41 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
     final isCorrect = answer?['is_correct'] == true;
     final awarded = _asInt(answer?['score_awarded']);
 
-    final Color background = !didAnswer
-        ? M3Tokens.surfaceVariant
-        : isCorrect
+    final Color background =
+        !didAnswer
+            ? M3Tokens.surfaceVariant
+            : isCorrect
             ? Colors.green.shade50
             : Colors.red.shade50;
-    final Color border = !didAnswer
-        ? M3Tokens.outlineVariant
-        : isCorrect
+    final Color border =
+        !didAnswer
+            ? M3Tokens.outlineVariant
+            : isCorrect
             ? Colors.green.shade200
             : Colors.red.shade200;
-    final Color foreground = !didAnswer
-        ? M3Tokens.onSurfaceVariant
-        : isCorrect
+    final Color foreground =
+        !didAnswer
+            ? M3Tokens.onSurfaceVariant
+            : isCorrect
             ? Colors.green.shade800
             : Colors.red.shade800;
-    final IconData icon = !didAnswer
-        ? Icons.remove_circle_outline
-        : isCorrect
+    final IconData icon =
+        !didAnswer
+            ? Icons.remove_circle_outline
+            : isCorrect
             ? Icons.check_circle
             : Icons.cancel;
-    final Color iconColor = !didAnswer
-        ? M3Tokens.onSurfaceVariant
-        : isCorrect
+    final Color iconColor =
+        !didAnswer
+            ? M3Tokens.onSurfaceVariant
+            : isCorrect
             ? Colors.green
             : Colors.red;
 
-    final String headline = !didAnswer
-        ? 'You did not answer this question'
-        : isCorrect
+    final String headline =
+        !didAnswer
+            ? 'You did not answer this question'
+            : isCorrect
             ? 'Correct! +$awarded pts'
             : 'Incorrect (+0 pts)';
 
@@ -1110,10 +1184,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
           const Text(
             'Waiting for the teacher to open the next question…',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: M3Tokens.onSurfaceVariant,
-            ),
+            style: TextStyle(fontSize: 12, color: M3Tokens.onSurfaceVariant),
           ),
         ],
       ),
@@ -1132,8 +1203,11 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
-              Icon(Icons.lock_clock,
-                  color: M3Tokens.onPrimaryContainer, size: 22),
+              Icon(
+                Icons.lock_clock,
+                color: M3Tokens.onPrimaryContainer,
+                size: 22,
+              ),
               SizedBox(width: 8),
               Text(
                 'Answer submitted',
@@ -1149,10 +1223,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
           const Text(
             'Waiting for the teacher to reveal the correct answer…',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 12,
-              color: M3Tokens.onPrimaryContainer,
-            ),
+            style: TextStyle(fontSize: 12, color: M3Tokens.onPrimaryContainer),
           ),
         ],
       ),
@@ -1169,8 +1240,11 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
       ),
       child: Row(
         children: [
-          Icon(Icons.timer_off_outlined,
-              color: Colors.orange.shade800, size: 22),
+          Icon(
+            Icons.timer_off_outlined,
+            color: Colors.orange.shade800,
+            size: 22,
+          ),
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
@@ -1255,8 +1329,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
             ),
             child: Column(
               children: [
-                const Icon(Icons.emoji_events,
-                    size: 56, color: Colors.amber),
+                const Icon(Icons.emoji_events, size: 56, color: Colors.amber),
                 const SizedBox(height: 12),
                 const Text(
                   'Quiz Completed!',
@@ -1390,14 +1463,16 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
     final answered = selectedOptionId != null;
     final awarded = _asInt(item['score_awarded']);
 
-    final Color iconColor = !answered
-        ? M3Tokens.onSurfaceVariant
-        : isCorrect
+    final Color iconColor =
+        !answered
+            ? M3Tokens.onSurfaceVariant
+            : isCorrect
             ? Colors.green
             : Colors.red;
-    final IconData icon = !answered
-        ? Icons.remove_circle_outline
-        : isCorrect
+    final IconData icon =
+        !answered
+            ? Icons.remove_circle_outline
+            : isCorrect
             ? Icons.check_circle
             : Icons.cancel;
 
@@ -1428,8 +1503,7 @@ class _LiveQuizStudentScreenState extends State<LiveQuizStudentScreen> {
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: M3Tokens.primaryContainer,
                   borderRadius: BorderRadius.circular(6),

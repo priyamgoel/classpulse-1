@@ -50,16 +50,24 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
       setState(() {
         _classrooms = classrooms;
         if (classrooms.isNotEmpty) {
-          if (widget.initialClassroomId != null) {
-            _selectedClassroomId = widget.initialClassroomId;
-            _selectedClassroom = classrooms.firstWhere(
-              (c) => c.id == widget.initialClassroomId,
-              orElse: () => classrooms.first,
-            );
-          } else {
-            _selectedClassroomId = classrooms.first.id;
-            _selectedClassroom = classrooms.first;
+          final initialId = widget.initialClassroomId;
+          // Only preselect the requested classroom when it is actually in the
+          // fetched list; otherwise DropdownButton would assert on a value that
+          // has no matching item.
+          Classroom selected = classrooms.first;
+          if (initialId != null) {
+            for (final classroom in classrooms) {
+              if (classroom.id == initialId) {
+                selected = classroom;
+                break;
+              }
+            }
           }
+          _selectedClassroom = selected;
+          _selectedClassroomId = selected.id;
+        } else {
+          _selectedClassroom = null;
+          _selectedClassroomId = null;
         }
         _isLoadingClassrooms = false;
       });
@@ -78,7 +86,9 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
     try {
       final token = AuthService.token;
       final res = await http.get(
-        Uri.parse('${AuthService.baseUrl}/courses/${_selectedClassroom!.courseId}/topics'),
+        Uri.parse(
+          '${AuthService.baseUrl}/courses/${_selectedClassroom!.courseId}/topics',
+        ),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (res.statusCode == 200) {
@@ -100,12 +110,15 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
       String url = '';
 
       if (queryText.isNotEmpty) {
-        url = '${AuthService.baseUrl}/search?q=${Uri.encodeComponent(queryText)}&course_id=${_selectedClassroom!.courseId}';
+        url =
+            '${AuthService.baseUrl}/search?q=${Uri.encodeComponent(queryText)}&course_id=${_selectedClassroom!.courseId}';
       } else {
-        url = '${AuthService.baseUrl}/doubts?course_id=${_selectedClassroom!.courseId}';
+        url =
+            '${AuthService.baseUrl}/doubts?course_id=${_selectedClassroom!.courseId}';
       }
 
-      if (_selectedClassroomId != null) url += '&classroom_id=$_selectedClassroomId';
+      if (_selectedClassroomId != null)
+        url += '&classroom_id=$_selectedClassroomId';
       if (_scopeFilter != 'ALL') url += '&scope=$_scopeFilter';
       if (_selectedTopicId != null) url += '&topic_id=$_selectedTopicId';
       if (_statusFilter != 'ALL') url += '&status=$_statusFilter';
@@ -139,10 +152,7 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'target_type': 'POST',
-          'target_id': postId,
-        }),
+        body: jsonEncode({'target_type': 'POST', 'target_id': postId}),
       );
 
       if (res.statusCode == 200) {
@@ -162,10 +172,11 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
     if (_selectedClassroom == null) return;
     final result = await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => CreateDoubtScreen(
-          courseId: _selectedClassroom!.courseId,
-          classroomId: _selectedClassroomId,
-        ),
+        builder:
+            (_) => CreateDoubtScreen(
+              courseId: _selectedClassroom!.courseId,
+              classroomId: _selectedClassroomId,
+            ),
       ),
     );
 
@@ -188,7 +199,11 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.forum_outlined, size: 48, color: M3Tokens.outlineVariant),
+              Icon(
+                Icons.forum_outlined,
+                size: 48,
+                color: M3Tokens.outlineVariant,
+              ),
               SizedBox(height: 12),
               Text(
                 'No Classrooms Found',
@@ -198,7 +213,10 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
               Text(
                 'Enroll in a course section to view and ask doubts.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: M3Tokens.onSurfaceVariant, fontSize: 13),
+                style: TextStyle(
+                  color: M3Tokens.onSurfaceVariant,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -215,7 +233,10 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
             children: [
               // Top Section Selector Bar
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 color: Colors.white,
                 child: Row(
                   children: [
@@ -226,20 +247,26 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                         child: DropdownButton<String>(
                           isExpanded: true,
                           value: _selectedClassroomId,
-                          items: _classrooms.map((c) {
-                            return DropdownMenuItem(
-                              value: c.id,
-                              child: Text(
-                                '${c.courseCode}: ${c.sectionName}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                            );
-                          }).toList(),
+                          items:
+                              _classrooms.map((c) {
+                                return DropdownMenuItem(
+                                  value: c.id,
+                                  child: Text(
+                                    '${c.courseCode}: ${c.sectionName}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
                           onChanged: (val) {
                             if (val != null) {
                               setState(() {
                                 _selectedClassroomId = val;
-                                _selectedClassroom = _classrooms.firstWhere((c) => c.id == val);
+                                _selectedClassroom = _classrooms.firstWhere(
+                                  (c) => c.id == val,
+                                );
                               });
                               _fetchTopics();
                               _fetchPosts();
@@ -254,37 +281,58 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
 
               // Search Input Field
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
                 color: Colors.white,
                 child: TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
                     hintText: 'Search questions, keywords, topics...',
-                    hintStyle: const TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
-                    prefixIcon: const Icon(Icons.search, size: 20, color: M3Tokens.primary),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() {});
-                              _fetchPosts();
-                            },
-                          )
-                        : null,
+                    hintStyle: const TextStyle(
+                      fontSize: 13,
+                      color: M3Tokens.onSurfaceVariant,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      size: 20,
+                      color: M3Tokens.primary,
+                    ),
+                    suffixIcon:
+                        _searchController.text.isNotEmpty
+                            ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {});
+                                _fetchPosts();
+                              },
+                            )
+                            : null,
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 8,
+                      horizontal: 12,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: M3Tokens.outlineVariant),
+                      borderSide: const BorderSide(
+                        color: M3Tokens.outlineVariant,
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: M3Tokens.outlineVariant),
+                      borderSide: const BorderSide(
+                        color: M3Tokens.outlineVariant,
+                      ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: M3Tokens.primary, width: 1.5),
+                      borderSide: const BorderSide(
+                        color: M3Tokens.primary,
+                        width: 1.5,
+                      ),
                     ),
                   ),
                   textInputAction: TextInputAction.search,
@@ -301,7 +349,10 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
 
               // Scope Navigation Filter Chips
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 color: Colors.white,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -322,14 +373,20 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
               // Topics Horizontal Scroll
               if (_topics.isNotEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
                   color: Colors.white,
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
                         FilterChip(
-                          label: const Text('All Topics', style: TextStyle(fontSize: 11)),
+                          label: const Text(
+                            'All Topics',
+                            style: TextStyle(fontSize: 11),
+                          ),
                           selected: _selectedTopicId == null,
                           onSelected: (_) {
                             setState(() => _selectedTopicId = null);
@@ -342,10 +399,17 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                           return Padding(
                             padding: const EdgeInsets.only(right: 6.0),
                             child: FilterChip(
-                              label: Text('${t['name']}', style: const TextStyle(fontSize: 11)),
+                              label: Text(
+                                '${t['name']}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
                               selected: isSel,
                               onSelected: (_) {
-                                setState(() => _selectedTopicId = isSel ? null : t['id'].toString());
+                                setState(
+                                  () =>
+                                      _selectedTopicId =
+                                          isSel ? null : t['id'].toString(),
+                                );
                                 _fetchPosts();
                               },
                             ),
@@ -360,39 +424,54 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
 
               // Posts List
               Expanded(
-                child: _isLoadingPosts
-                    ? const Center(child: CircularProgressIndicator())
-                    : _posts.isEmpty
+                child:
+                    _isLoadingPosts
+                        ? const Center(child: CircularProgressIndicator())
+                        : _posts.isEmpty
                         ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24.0),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.help_outline, size: 48, color: M3Tokens.outlineVariant),
-                                  const SizedBox(height: 12),
-                                  const Text('No Questions Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Be the first student to post a question in this scope!',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(color: M3Tokens.onSurfaceVariant, fontSize: 13),
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.help_outline,
+                                  size: 48,
+                                  color: M3Tokens.outlineVariant,
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  'No Questions Found',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
                                   ),
-                                  const SizedBox(height: 16),
-                                  FilledButton.icon(
-                                    onPressed: _openCreateDoubt,
-                                    icon: const Icon(Icons.add, size: 18),
-                                    label: const Text('Ask a Doubt'),
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Be the first student to post a question in this scope!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: M3Tokens.onSurfaceVariant,
+                                    fontSize: 13,
                                   ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton.icon(
+                                  onPressed: _openCreateDoubt,
+                                  icon: const Icon(Icons.add, size: 18),
+                                  label: const Text('Ask a Doubt'),
+                                ),
+                              ],
                             ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: _posts.length,
-                            itemBuilder: (ctx, idx) => _buildPostListItem(_posts[idx]),
                           ),
+                        )
+                        : ListView.builder(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _posts.length,
+                          itemBuilder:
+                              (ctx, idx) => _buildPostListItem(_posts[idx]),
+                        ),
               ),
             ],
           ),
@@ -409,7 +488,13 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
   Widget _buildScopeChip(String value, String label) {
     final isSelected = _scopeFilter == value;
     return ChoiceChip(
-      label: Text(label, style: TextStyle(fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
       selected: isSelected,
       onSelected: (_) {
         setState(() => _scopeFilter = value);
@@ -419,7 +504,8 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
   }
 
   Widget _buildPostListItem(Map<String, dynamic> post) {
-    final isResolved = post['status'] == 'RESOLVED' || post['has_accepted_solution'] == true;
+    final isResolved =
+        post['status'] == 'RESOLVED' || post['has_accepted_solution'] == true;
     final hasMarked = post['user_has_marked_helpful'] == true;
     final isAnonymous = post['is_anonymous'] == true;
 
@@ -435,11 +521,13 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
       child: InkWell(
         borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
         onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => DoubtDetailScreen(doubtId: post['id']),
-            ),
-          ).then((_) => _fetchPosts());
+          Navigator.of(context)
+              .push(
+                MaterialPageRoute(
+                  builder: (_) => DoubtDetailScreen(doubtId: post['id']),
+                ),
+              )
+              .then((_) => _fetchPosts());
         },
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -452,29 +540,50 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                   if (isResolved)
                     Container(
                       margin: const EdgeInsets.only(right: 6),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.green.shade50,
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: const Text('SOLVED', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 9)),
+                      child: const Text(
+                        'SOLVED',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 9,
+                        ),
+                      ),
                     ),
                   Container(
                     margin: const EdgeInsets.only(right: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: M3Tokens.primaryContainer,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       post['audience_scope'] ?? 'CLASSROOM',
-                      style: const TextStyle(color: M3Tokens.onPrimaryContainer, fontWeight: FontWeight.bold, fontSize: 9),
+                      style: const TextStyle(
+                        color: M3Tokens.onPrimaryContainer,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 9,
+                      ),
                     ),
                   ),
                   if (post['topic_name'] != null)
                     Text(
                       post['topic_name'],
-                      style: const TextStyle(color: M3Tokens.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        color: M3Tokens.onSurfaceVariant,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                 ],
               ),
@@ -483,7 +592,11 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
               // Title
               Text(
                 post['title'] ?? '',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: M3Tokens.onSurface),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: M3Tokens.onSurface,
+                ),
               ),
               const SizedBox(height: 4),
 
@@ -492,7 +605,11 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                 post['body'] ?? '',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: M3Tokens.onSurfaceVariant, height: 1.4),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: M3Tokens.onSurfaceVariant,
+                  height: 1.4,
+                ),
               ),
               const SizedBox(height: 12),
               const Divider(height: 1),
@@ -505,14 +622,23 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                   Row(
                     children: [
                       Icon(
-                        isAnonymous ? Icons.masks_outlined : Icons.person_outline,
+                        isAnonymous
+                            ? Icons.masks_outlined
+                            : Icons.person_outline,
                         size: 14,
-                        color: isAnonymous ? Colors.purple : M3Tokens.onSurfaceVariant,
+                        color:
+                            isAnonymous
+                                ? Colors.purple
+                                : M3Tokens.onSurfaceVariant,
                       ),
                       const SizedBox(width: 4),
                       Text(
                         post['author_display_name'] ?? 'Peer',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: M3Tokens.onSurfaceVariant),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: M3Tokens.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -524,9 +650,14 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                         child: Row(
                           children: [
                             Icon(
-                              hasMarked ? Icons.thumb_up : Icons.thumb_up_outlined,
+                              hasMarked
+                                  ? Icons.thumb_up
+                                  : Icons.thumb_up_outlined,
                               size: 13,
-                              color: hasMarked ? M3Tokens.primary : M3Tokens.onSurfaceVariant,
+                              color:
+                                  hasMarked
+                                      ? M3Tokens.primary
+                                      : M3Tokens.onSurfaceVariant,
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -534,7 +665,10 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
-                                color: hasMarked ? M3Tokens.primary : M3Tokens.onSurfaceVariant,
+                                color:
+                                    hasMarked
+                                        ? M3Tokens.primary
+                                        : M3Tokens.onSurfaceVariant,
                               ),
                             ),
                           ],
@@ -543,11 +677,19 @@ class _DoubtForumScreenState extends State<DoubtForumScreen> {
                       const SizedBox(width: 12),
                       Row(
                         children: [
-                          const Icon(Icons.chat_bubble_outline, size: 13, color: M3Tokens.onSurfaceVariant),
+                          const Icon(
+                            Icons.chat_bubble_outline,
+                            size: 13,
+                            color: M3Tokens.onSurfaceVariant,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             '${post['reply_count'] ?? 0}',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: M3Tokens.onSurfaceVariant),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: M3Tokens.onSurfaceVariant,
+                            ),
                           ),
                         ],
                       ),

@@ -58,7 +58,7 @@ import {
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens, chartTokens } from '@/theme/tokens';
 import { WordCloudMuteDialog } from './WordCloudMuteDialog';
-import { getAuthHeaders } from '@/lib/authStorage';
+import { getAuthHeaders, getAuthToken } from '@/lib/authStorage';
 
 export interface LiveActivity {
   id: string;
@@ -217,11 +217,21 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
       fetchSubmissions();
     }
 
-    const socket = io(API_BASE_URL);
+    const socket = io(API_BASE_URL, {
+      auth: { token: getAuthToken() },
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('join_activity_teacher', activityId);
+      socket.emit('join_activity_teacher', activityId, (result: { ok?: boolean; error?: string } | undefined) => {
+        if (!result?.ok) {
+          setError(result?.error || 'The server denied access to this live activity room.');
+        }
+      });
+    });
+
+    socket.on('auth:error', (data: { error?: string } | undefined) => {
+      setError(data?.error || 'Socket authentication failed. Please sign in again.');
     });
 
     socket.on('pulsemeter:results', (data: any) => {

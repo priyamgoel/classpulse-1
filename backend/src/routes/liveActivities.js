@@ -186,7 +186,9 @@ router.get('/', authenticateToken, requireRole('teacher'), async (req, res) => {
                    THEN (SELECT COUNT(DISTINCT qr.student_id)::int FROM quiz_responses qr WHERE qr.live_activity_id = la.id)
                    ELSE (SELECT COUNT(DISTINCT pr.student_id)::int FROM pulsemeter_responses pr WHERE pr.live_activity_id = la.id)
                    END AS participant_count,
-              (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = la.classroom_id) AS present_count,
+              COALESCE((SELECT COUNT(*)::int FROM attendance_records ar
+                        WHERE ar.session_id = la.attendance_session_id), 0) AS present_count,
+              (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = la.classroom_id) AS enrolled_count,
               CASE WHEN la.activity_type = 'PULSEMETER'
                    THEN (SELECT COUNT(*)::int FROM pulsemeter_responses pr
                          WHERE pr.live_activity_id = la.id AND pr.is_blocked = true)
@@ -418,6 +420,10 @@ router.post('/:id/respond', authenticateToken, async (req, res) => {
         });
       }
     } else if (activity.pm_type === 'WORD_CLOUD') {
+      if (responseStr.length > 60) {
+        return res.status(400).json({ error: 'Response is too long (max 60 characters).' });
+      }
+
       // Automatic profanity & offensive language check
       const filterResult = checkProfanity(responseStr);
       if (filterResult.isBlocked) {
@@ -691,10 +697,14 @@ router.delete('/:id/responses/:responseId', authenticateToken, requireRole('teac
       return res.status(403).json({ error: 'Forbidden: You do not own this classroom' });
     }
 
-    await db.query(
+    const deleteRes = await db.query(
       `DELETE FROM pulsemeter_responses WHERE id = $1 AND live_activity_id = $2`,
       [responseId, activityId]
     );
+
+    if (deleteRes.rowCount === 0 || (Array.isArray(deleteRes.rows) && deleteRes.rows.length === 0)) {
+      return res.status(404).json({ error: 'Response not found' });
+    }
 
     // Recompute and emit live update
     const aggregated = await computeAggregatedResults(activityId, activity);
@@ -1562,6 +1572,95 @@ router.get('/:id/quiz/results', authenticateToken, requireRole('teacher'), async
 });
 
 /**
+ * GET /live-activities/:id/quiz/state
+ * Role: Teacher (classroom owner)
+ * Returns the durable live-quiz state so the web UI can resume after a reload
+ * without restarting the quiz or re-broadcasting questions.
+ */
+router.get('/:id/quiz/state', authenticateToken, requireRole('teacher'), async (req, res) => {
+  try {
+    const activityId = req.params.id;
+
+    if (!isUuid(activityId)) {
+      return res.status(400).json({ error: 'Invalid live activity id' });
+    }
+
+    const activity = await getQuizActivity(activityId);
+    if (!activity) {
+      return res.status(404).json({ error: 'Live Quiz not found' });
+    }
+
+    if (activity.teacher_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const questions = await loadQuizQuestions(activity);
+    const latestState = await getLatestQuestionState(activityId);
+
+    let stage = 'LOBBY';
+    let currentQuestion = null;
+
+    if (activity.status === 'ENDED') {
+      stage = 'FINAL_LEADERBOARD';
+    } else if (latestState) {
+      const nowMs = Date.now();
+      const revealed = latestState.revealed === true;
+      const endsAtMs = Number(latestState.ends_at_ms);
+      const question = questions.find((q) => q.id === latestState.question_id);
+
+      if (revealed) {
+        stage = 'QUESTION_RESULTS';
+      } else {
+        // A question whose timer ran out but has not been revealed is still
+        // "active" from the teacher's perspective: the UI must not show the
+        // answer key until the teacher explicitly reveals it.
+        stage = 'QUESTION_ACTIVE';
+      }
+
+      currentQuestion = {
+        question_id: latestState.question_id,
+        question_index: question ? question.order_index : null,
+        question_text: question ? question.question_text : null,
+        options: question && Array.isArray(question.options) ? question.options : [],
+        start_time_ms: Number(latestState.started_at_ms),
+        end_time_ms: endsAtMs,
+        time_expired: nowMs > endsAtMs,
+        revealed,
+        correct_option_id: revealed && question ? question.correct_option_id : null,
+      };
+    }
+
+    let answeredCount = 0;
+    if (latestState) {
+      const answeredRes = await db.query(
+        `SELECT COUNT(*)::int AS total
+         FROM quiz_responses
+         WHERE live_activity_id = $1 AND question_id = $2`,
+        [activityId, latestState.question_id]
+      );
+      answeredCount = answeredRes.rows[0] ? answeredRes.rows[0].total : 0;
+    }
+
+    const leaderboard = await computeQuizLeaderboard(activityId);
+
+    res.json({
+      activityId: activity.id,
+      title: activity.resolved_title,
+      scoring_mode: activity.resolved_scoring_mode,
+      status: activity.status,
+      question_count: questions.length,
+      stage,
+      current_question: currentQuestion,
+      answered_count: answeredCount,
+      leaderboard,
+    });
+  } catch (err) {
+    console.error('[ClassPulse LiveQuiz] Error fetching quiz state:', err);
+    res.status(500).json({ error: 'Failed to fetch quiz state' });
+  }
+});
+
+/**
  * GET /live-activities/:id/quiz/my-results
  * Role: Student (enrolled)
  * A student's own answers, score, and rank for a quiz run.
@@ -1593,6 +1692,18 @@ router.get('/:id/quiz/my-results', authenticateToken, async (req, res) => {
     }
 
     const questions = await loadQuizQuestions(activity);
+
+    // Correct answers are only exposed once the teacher has revealed the
+    // question. Unrevealed questions must not leak the correct_option_id.
+    const stateRes = await db.query(
+      `SELECT question_id, revealed
+       FROM activity_question_states
+       WHERE live_activity_id = $1`,
+      [activityId]
+    );
+    const revealedByQuestion = new Map(
+      stateRes.rows.map((state) => [state.question_id, state.revealed === true])
+    );
 
     const respRes = await db.query(
       `SELECT question_id, selected_option_id, is_correct, score_awarded
@@ -1633,11 +1744,12 @@ router.get('/:id/quiz/my-results', authenticateToken, async (req, res) => {
       participants,
       questions: questions.map((q) => {
         const mine = myAnswers.get(q.id);
+        const revealed = revealedByQuestion.get(q.id) === true;
         return {
           question_id: q.id,
           question_text: q.question_text,
           selected_option_id: mine ? mine.selected_option_id : null,
-          correct_option_id: q.correct_option_id,
+          correct_option_id: revealed ? q.correct_option_id : null,
           is_correct: mine ? mine.is_correct : false,
           score_awarded: mine ? mine.score_awarded : 0,
         };

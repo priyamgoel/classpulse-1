@@ -4,6 +4,27 @@ const cors = require('cors');
 const { Server } = require('socket.io');
 require('dotenv').config();
 
+/**
+ * Fail fast on missing infrastructure secrets. In tests the harness injects
+ * deterministic values, so this is skipped there.
+ */
+function validateEnvironment() {
+  if (process.env.NODE_ENV === 'test') {
+    return;
+  }
+
+  const required = ['DATABASE_URL', 'JWT_SECRET', 'QR_HMAC_SECRET'];
+  const missing = required.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    // Never log the values themselves.
+    console.error(`[ClassPulse Backend] Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
+
+validateEnvironment();
+
 const db = require('./db');
 const { getRedisClient, getRedisStatus } = require('./redis');
 const authRoutes = require('./routes/auth');
@@ -18,74 +39,65 @@ const quizzesRoutes = require('./routes/quizzes');
 const doubtsRoutes = require('./routes/doubts');
 const topicsRoutes = require('./routes/topics');
 const searchRoutes = require('./routes/search');
+const { createSocketServer } = require('./socket');
+const { expireStaleSessions } = require('./services/sessionLifecycle');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 
+// Render/other reverse proxies terminate TLS and set X-Forwarded-For. Trust one
+// hop so rate limiting sees the real client IP rather than the proxy IP.
+app.set('trust proxy', 1);
+
+// CORS allowlist. Requests without an Origin header (mobile apps, curl,
+// server-to-server) are still allowed.
+const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function corsOrigin(origin, callback) {
+  if (!origin || corsOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  return callback(new Error('Not allowed by CORS'));
+}
+
 // Setup Socket.io real-time WebSocket layer
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
   },
 });
 
 app.set('io', io);
+createSocketServer(io);
 
-io.on('connection', (socket) => {
-  console.log(`[ClassPulse Socket] Client connected: ${socket.id}`);
+app.use(cors({ origin: corsOrigin }));
+app.use(express.json({ limit: '200kb' }));
 
-  // Attendance session rooms
-  socket.on('join_session', (sessionId) => {
-    socket.join(`session_${sessionId}`);
-    console.log(`[ClassPulse Socket] Client ${socket.id} joined room session_${sessionId}`);
-  });
+// Initialize PostgreSQL database and Redis on startup. The server still starts
+// if the database is unavailable so /health can report a degraded state.
+db.initDb().catch((err) => {
+  console.error('[ClassPulse DB] Startup initialization failed:', err.message);
+});
+getRedisClient();
 
-  socket.on('leave_session', (sessionId) => {
-    socket.leave(`session_${sessionId}`);
-    console.log(`[ClassPulse Socket] Client ${socket.id} left room session_${sessionId}`);
-  });
-
-  // Classroom broadcast channels
-  socket.on('join_classroom', (classroomId) => {
-    socket.join(`classroom_${classroomId}`);
-    console.log(`[ClassPulse Socket] Client ${socket.id} joined room classroom_${classroomId}`);
-  });
-
-  socket.on('leave_classroom', (classroomId) => {
-    socket.leave(`classroom_${classroomId}`);
-    console.log(`[ClassPulse Socket] Client ${socket.id} left room classroom_${classroomId}`);
-  });
-
-  // Live Activity rooms (PulseMeter / Quizzing)
-  socket.on('join_activity', (activityId) => {
-    socket.join(`activity_${activityId}`);
-    console.log(`[ClassPulse Socket] Client ${socket.id} joined room activity_${activityId}`);
-  });
-
-  socket.on('join_activity_teacher', (activityId) => {
-    socket.join(`activity_${activityId}_teacher`);
-    console.log(`[ClassPulse Socket] Teacher ${socket.id} joined room activity_${activityId}_teacher`);
-  });
-
-  socket.on('leave_activity', (activityId) => {
-    socket.leave(`activity_${activityId}`);
-    socket.leave(`activity_${activityId}_teacher`);
-    console.log(`[ClassPulse Socket] Client ${socket.id} left activity rooms for ${activityId}`);
-  });
-
-  socket.on('disconnect', () => {
-    console.log(`[ClassPulse Socket] Client disconnected: ${socket.id}`);
-  });
+expireStaleSessions().catch((err) => {
+  console.error('[ClassPulse Session] Failed to expire stale sessions on startup:', err.message);
 });
 
-app.use(cors());
-app.use(express.json());
+const staleSessionTimer = setInterval(() => {
+  expireStaleSessions().catch((err) => {
+    console.error('[ClassPulse Session] Failed to expire stale sessions:', err.message);
+  });
+}, 5 * 60 * 1000);
 
-// Initialize PostgreSQL database and Redis on startup
-db.initDb();
-getRedisClient();
+if (typeof staleSessionTimer.unref === 'function') {
+  staleSessionTimer.unref();
+}
 
 // Mount API Routes
 app.use('/auth', authRoutes);
@@ -102,14 +114,18 @@ app.use('/courses', topicsRoutes);
 app.use('/search', searchRoutes);
 
 // Health Check Endpoint (Part 1 Acceptance Requirement)
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
+app.get('/health', async (req, res) => {
+  const dbReady = await db.healthCheck();
+  const status = dbReady ? 'ok' : 'degraded';
+
+  res.status(dbReady ? 200 : 503).json({
+    status,
     service: 'classpulse-backend',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
+    db: { status: dbReady ? 'ready' : 'unavailable' },
     redis: getRedisStatus(),
   });
 });
@@ -122,8 +138,46 @@ app.get('/', (req, res) => {
   });
 });
 
+// JSON 404 for unknown routes
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Final error handler: log server-side, never expose stack traces to clients.
+app.use((err, req, res, next) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  if (err && err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ error: 'Not allowed by CORS' });
+  }
+
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large' });
+  }
+
+  console.error('[ClassPulse Backend] Unhandled error:', err && err.stack ? err.stack : err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 server.listen(PORT, () => {
   console.log(`[ClassPulse Backend] Server running on http://localhost:${PORT}`);
   console.log(`[ClassPulse Backend] Real-time WebSocket listening on port ${PORT}`);
   console.log(`[ClassPulse Backend] Health check available at http://localhost:${PORT}/health`);
 });
+
+function shutdown(signal) {
+  console.log(`[ClassPulse Backend] Received ${signal}. Shutting down...`);
+  const forceExit = setTimeout(() => process.exit(1), 10_000);
+  if (typeof forceExit.unref === 'function') forceExit.unref();
+
+  server.close(() => {
+    Promise.resolve(db.pool && db.pool.end ? db.pool.end() : null)
+      .catch((err) => console.error('[ClassPulse DB] Error closing pool:', err.message))
+      .finally(() => process.exit(0));
+  });
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

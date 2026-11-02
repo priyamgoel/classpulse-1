@@ -22,6 +22,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import BlockIcon from '@mui/icons-material/Block';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface WordCloudMuteDialogProps {
   open: boolean;
@@ -70,12 +71,11 @@ export const WordCloudMuteDialog: React.FC<WordCloudMuteDialogProps> = ({
     setError(null);
 
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/word-cloud-mutes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           classroom_id: classroomId,

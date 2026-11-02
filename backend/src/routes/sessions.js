@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { generate3QrSequence } = require('../services/qrTokenService');
+const { isEnrolled } = require('../utils/access');
 
 const router = express.Router();
 
@@ -168,7 +169,7 @@ router.post('/:id/end', authenticateToken, requireRole('teacher'), async (req, r
   }
 });
 
-// GET /sessions/active-mine — Fetch any active (unended) session for the authenticated teacher
+// GET /sessions/active-mine — Fetch all active (unended) sessions for the authenticated teacher
 router.get('/active-mine', authenticateToken, requireRole('teacher'), async (req, res) => {
   try {
     const result = await db.query(
@@ -177,16 +178,17 @@ router.get('/active-mine', authenticateToken, requireRole('teacher'), async (req
        JOIN classrooms c ON s.classroom_id = c.id
        JOIN courses co ON c.course_id = co.id
        WHERE c.teacher_id = $1 AND s.ended_at IS NULL
-       ORDER BY s.started_at DESC
-       LIMIT 1`,
+       ORDER BY s.started_at DESC`,
       [req.user.id]
     );
 
-    if (result.rows.length === 0) {
-      return res.json({ session: null });
-    }
+    const sessions = result.rows;
 
-    res.json({ session: result.rows[0] });
+    res.json({
+      sessions,
+      // Backwards compatibility: older clients read a single `session` field.
+      session: sessions[0] || null,
+    });
   } catch (err) {
     console.error('Error fetching active teacher session:', err);
     res.status(500).json({ error: 'Failed to fetch active session' });
@@ -199,7 +201,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
     const sessionId = req.params.id;
 
     const result = await db.query(
-      `SELECT s.*, c.section_name, co.course_code, co.course_name, u.full_name as teacher_name,
+      `SELECT s.*, c.section_name, c.teacher_id, co.course_code, co.course_name, u.full_name as teacher_name,
               (SELECT COUNT(*)::int FROM attendance_records ar WHERE ar.session_id = s.id) as present_count,
               (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id) as total_enrolled
        FROM sessions s
@@ -214,7 +216,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    res.json({ session: result.rows[0] });
+    const session = result.rows[0];
+
+    const isOwner = req.user.role === 'teacher' && session.teacher_id === req.user.id;
+    const isMember = req.user.role === 'student' && await isEnrolled(req.user.id, session.classroom_id);
+
+    if (!isOwner && !isMember) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this session' });
+    }
+
+    // Internal authorization field; not part of the public session shape.
+    delete session.teacher_id;
+
+    res.json({ session });
   } catch (err) {
     console.error('Error fetching session:', err);
     res.status(500).json({ error: 'Failed to fetch session' });

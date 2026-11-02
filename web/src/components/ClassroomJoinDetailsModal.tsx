@@ -19,6 +19,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface ClassroomJoinDetailsModalProps {
   open: boolean;
@@ -59,10 +60,9 @@ export const ClassroomJoinDetailsModal: React.FC<ClassroomJoinDetailsModalProps>
     setRegenerating(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const response = await fetch(`${API_BASE_URL}/classrooms/${classroom.id}/regenerate-join`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await response.json();
       if (response.ok) {

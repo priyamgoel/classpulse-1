@@ -17,6 +17,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface Course {
   id: string;
@@ -54,9 +55,8 @@ export const CreateClassroomDialog: React.FC<CreateClassroomDialogProps> = ({
     setLoadingCourses(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const response = await fetch(`${API_BASE_URL}/courses`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await response.json();
       if (response.ok) {
@@ -85,12 +85,11 @@ export const CreateClassroomDialog: React.FC<CreateClassroomDialogProps> = ({
     setError(null);
 
     try {
-      const token = localStorage.getItem('classpulse_token');
       const response = await fetch(`${API_BASE_URL}/classrooms`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           course_id: selectedCourseId,

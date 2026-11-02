@@ -11,6 +11,11 @@ router.get('/:course_id/topics', authenticateToken, async (req, res) => {
   try {
     const { course_id } = req.params;
 
+    const courseCheck = await db.query('SELECT id FROM courses WHERE id = $1', [course_id]);
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
     const result = await db.query(
       `SELECT ct.id, ct.course_id, ct.name, ct.created_at,
               COUNT(dp.id)::int as post_count
@@ -43,6 +48,15 @@ router.post('/:course_id/topics', authenticateToken, async (req, res) => {
     }
 
     const cleanName = name.trim();
+
+    if (cleanName.length > 100) {
+      return res.status(400).json({ error: 'Topic name must be 100 characters or fewer' });
+    }
+
+    const courseCheck = await db.query('SELECT id FROM courses WHERE id = $1', [course_id]);
+    if (courseCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
 
     const result = await db.query(
       `INSERT INTO course_topics (course_id, name)

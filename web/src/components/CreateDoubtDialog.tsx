@@ -31,6 +31,7 @@ import SchoolIcon from '@mui/icons-material/School';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 import MasksIcon from '@mui/icons-material/Masks';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface CreateDoubtDialogProps {
   open: boolean;
@@ -74,9 +75,8 @@ export const CreateDoubtDialog: React.FC<CreateDoubtDialogProps> = ({
   const fetchTopics = async () => {
     setLoadingTopics(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/courses/${courseId}/topics`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok && data.topics) {
@@ -100,8 +100,6 @@ export const CreateDoubtDialog: React.FC<CreateDoubtDialogProps> = ({
     setError(null);
 
     try {
-      const token = localStorage.getItem('classpulse_token');
-
       // If user typed a new custom topic, create it first
       let resolvedTopicId = topicId || null;
       if (!resolvedTopicId && newTopicName.trim()) {
@@ -109,7 +107,7 @@ export const CreateDoubtDialog: React.FC<CreateDoubtDialogProps> = ({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            ...getAuthHeaders(),
           },
           body: JSON.stringify({ name: newTopicName.trim() }),
         });
@@ -123,7 +121,7 @@ export const CreateDoubtDialog: React.FC<CreateDoubtDialogProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           course_id: courseId,

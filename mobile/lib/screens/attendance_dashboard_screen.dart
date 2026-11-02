@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -9,11 +10,13 @@ class AttendanceDashboardScreen extends StatefulWidget {
   const AttendanceDashboardScreen({super.key});
 
   @override
-  State<AttendanceDashboardScreen> createState() => _AttendanceDashboardScreenState();
+  State<AttendanceDashboardScreen> createState() =>
+      _AttendanceDashboardScreenState();
 }
 
 class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
   bool _isLoading = true;
+  String? _errorMessage;
   Map<String, dynamic>? _overallStats;
   List<dynamic> _summaries = [];
   List<dynamic> _records = [];
@@ -39,20 +42,29 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
     return defaultVal;
   }
 
+  String _formatPercent(double value) {
+    return value == value.roundToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(1);
+  }
+
   Future<void> _fetchAttendanceData() async {
     setState(() {
       _isLoading = true;
+      _errorMessage = null;
     });
 
     try {
       final token = AuthService.token;
-      final response = await http.get(
-        Uri.parse('${AuthService.baseUrl}/attendance/me'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await http
+          .get(
+            Uri.parse('${AuthService.baseUrl}/attendance/me'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -64,11 +76,23 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
         });
       } else {
         setState(() {
+          _errorMessage =
+              response.statusCode == 401
+                  ? 'Your session has expired. Please sign out and log in again.'
+                  : 'Unable to load attendance data (HTTP ${response.statusCode}).';
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } on TimeoutException {
       setState(() {
+        _errorMessage =
+            'The server did not respond. Please check your connection and retry.';
+        _isLoading = false;
+      });
+    } catch (_) {
+      setState(() {
+        _errorMessage =
+            'Network error while loading attendance data. Please retry.';
         _isLoading = false;
       });
     }
@@ -79,7 +103,8 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
     final courseCode = summary['course_code'] ?? '';
     final courseName = summary['course_name'] ?? '';
 
-    final courseRecords = _records.where((r) => r['classroom_id'] == classroomId).toList();
+    final courseRecords =
+        _records.where((r) => r['classroom_id'] == classroomId).toList();
 
     showModalBottomSheet(
       context: context,
@@ -88,102 +113,143 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (_, scrollController) => Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: M3Tokens.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '$courseCode — Session History',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: M3Tokens.onSurface),
-              ),
-              Text(
-                courseName,
-                style: const TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
-              ),
-              const SizedBox(height: 16),
-              const Divider(),
-              if (courseRecords.isEmpty)
-                const Expanded(
-                  child: Center(
-                    child: Text(
-                      'No session logs found for this course.',
-                      style: TextStyle(color: M3Tokens.onSurfaceVariant),
-                    ),
-                  ),
-                )
-              else
-                Expanded(
-                  child: ListView.separated(
-                    controller: scrollController,
-                    itemCount: courseRecords.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, idx) {
-                      final rec = courseRecords[idx];
-                      final dateStr = rec['session_started_at'] ?? rec['validated_at'];
-                      final date = DateTime.tryParse(dateStr ?? '')?.toLocal();
-                      final aclMs = _parseInt(rec['acl_ms'], -1);
-
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.green.shade50,
-                          child: const Icon(Icons.check_circle, color: Colors.green, size: 22),
+      builder:
+          (ctx) => DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            minChildSize: 0.4,
+            maxChildSize: 0.9,
+            expand: false,
+            builder:
+                (_, scrollController) => Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: M3Tokens.outlineVariant,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
-                        title: Text(
-                          date != null
-                              ? '${date.day}/${date.month}/${date.year} at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'
-                              : 'Session',
-                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        '$courseCode — Session History',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: M3Tokens.onSurface,
                         ),
-                        subtitle: Text(
-                          'Teacher: ${rec['teacher_name'] ?? "Instructor"}',
-                          style: const TextStyle(fontSize: 12, color: M3Tokens.onSurfaceVariant),
+                      ),
+                      Text(
+                        courseName,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: M3Tokens.onSurfaceVariant,
                         ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            const Text(
-                              'PRESENT',
-                              style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                            if (aclMs >= 0)
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.flash_on, size: 12, color: M3Tokens.secondary),
-                                  Text('${aclMs}ms',
-                                      style: const TextStyle(
-                                          fontSize: 10, fontWeight: FontWeight.bold, color: M3Tokens.secondary)),
-                                ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      if (courseRecords.isEmpty)
+                        const Expanded(
+                          child: Center(
+                            child: Text(
+                              'No session logs found for this course.',
+                              style: TextStyle(
+                                color: M3Tokens.onSurfaceVariant,
                               ),
-                          ],
+                            ),
+                          ),
+                        )
+                      else
+                        Expanded(
+                          child: ListView.separated(
+                            controller: scrollController,
+                            itemCount: courseRecords.length,
+                            separatorBuilder:
+                                (_, __) => const Divider(height: 1),
+                            itemBuilder: (_, idx) {
+                              final rec = courseRecords[idx];
+                              final dateStr =
+                                  rec['session_started_at'] ??
+                                  rec['validated_at'];
+                              final date =
+                                  DateTime.tryParse(dateStr ?? '')?.toLocal();
+                              final aclMs = _parseInt(rec['acl_ms'], -1);
+
+                              return ListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                  horizontal: 0,
+                                ),
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.green.shade50,
+                                  child: const Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green,
+                                    size: 22,
+                                  ),
+                                ),
+                                title: Text(
+                                  date != null
+                                      ? '${date.day}/${date.month}/${date.year} at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'
+                                      : 'Session',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  'Teacher: ${rec['teacher_name'] ?? "Instructor"}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: M3Tokens.onSurfaceVariant,
+                                  ),
+                                ),
+                                trailing: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    const Text(
+                                      'PRESENT',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    if (aclMs >= 0)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.flash_on,
+                                            size: 12,
+                                            color: M3Tokens.secondary,
+                                          ),
+                                          Text(
+                                            '${aclMs}ms',
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: M3Tokens.secondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
                         ),
-                      );
-                    },
+                    ],
                   ),
                 ),
-            ],
           ),
-        ),
-      ),
     );
   }
 
@@ -207,7 +273,11 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.bar_chart_rounded, color: ChartTokens.primary, size: 22),
+                  Icon(
+                    Icons.bar_chart_rounded,
+                    color: ChartTokens.primary,
+                    size: 22,
+                  ),
                   SizedBox(width: 8),
                   Text(
                     'Subject Attendance Rates (%)',
@@ -253,11 +323,12 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                   show: true,
                   drawVerticalLine: false,
                   horizontalInterval: 25,
-                  getDrawingHorizontalLine: (value) => FlLine(
-                    color: ChartTokens.grid,
-                    strokeWidth: 1,
-                    dashArray: [4, 4],
-                  ),
+                  getDrawingHorizontalLine:
+                      (value) => FlLine(
+                        color: ChartTokens.grid,
+                        strokeWidth: 1,
+                        dashArray: [4, 4],
+                      ),
                 ),
                 extraLinesData: ExtraLinesData(
                   horizontalLines: [
@@ -282,8 +353,12 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                 ),
                 titlesData: FlTitlesData(
                   show: true,
-                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
@@ -307,9 +382,11 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                       reservedSize: 32,
                       getTitlesWidget: (val, meta) {
                         final idx = val.toInt();
-                        if (idx < 0 || idx >= _summaries.length) return const SizedBox.shrink();
+                        if (idx < 0 || idx >= _summaries.length)
+                          return const SizedBox.shrink();
                         final summary = _summaries[idx];
-                        final code = (summary['course_code'] ?? 'Course').toString();
+                        final code =
+                            (summary['course_code'] ?? 'Course').toString();
                         return Padding(
                           padding: const EdgeInsets.only(top: 8.0),
                           child: Text(
@@ -341,8 +418,13 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
                       final summary = _summaries[groupIndex];
                       final code = summary['course_code'] ?? '';
-                      final attended = _parseInt(summary['attended_sessions'], 0);
+                      final attended = _parseInt(
+                        summary['attended_sessions'],
+                        0,
+                      );
                       final total = _parseInt(summary['total_sessions'], 0);
+                      final hasSessions = total > 0;
+                      final eligible = hasSessions && rod.toY >= 75;
                       return BarTooltipItem(
                         '$code\n',
                         const TextStyle(
@@ -352,17 +434,35 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                         ),
                         children: [
                           TextSpan(
-                            text: '${rod.toY.toStringAsFixed(1)}% ($attended/$total)\n',
+                            text:
+                                hasSessions
+                                    ? '${_formatPercent(rod.toY)}% ($attended/$total)\n'
+                                    : 'No sessions yet\n',
                             style: TextStyle(
-                              color: rod.toY >= 75 ? ChartTokens.success : ChartTokens.error,
+                              color:
+                                  !hasSessions
+                                      ? M3Tokens.onSurfaceVariant
+                                      : eligible
+                                      ? ChartTokens.success
+                                      : ChartTokens.error,
                               fontWeight: FontWeight.bold,
                               fontSize: 11,
                             ),
                           ),
                           TextSpan(
-                            text: rod.toY >= 75 ? 'Eligible' : 'Shortage Warning',
+                            text:
+                                !hasSessions
+                                    ? 'Awaiting first session'
+                                    : eligible
+                                    ? 'Eligible'
+                                    : 'Shortage Warning',
                             style: TextStyle(
-                              color: rod.toY >= 75 ? ChartTokens.success : ChartTokens.error,
+                              color:
+                                  !hasSessions
+                                      ? M3Tokens.onSurfaceVariant
+                                      : eligible
+                                      ? ChartTokens.success
+                                      : ChartTokens.error,
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
                             ),
@@ -374,7 +474,12 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                 ),
                 barGroups: List.generate(_summaries.length, (idx) {
                   final s = _summaries[idx];
-                  final pct = _parseDouble(s['attendance_percentage'], 100.0);
+                  final total = _parseInt(s['total_sessions'], 0);
+                  final hasSessions = total > 0;
+                  final pct =
+                      hasSessions
+                          ? _parseDouble(s['attendance_percentage'], 0.0)
+                          : 0.0;
                   final isEligible = pct >= 75.0;
 
                   return BarChartGroupData(
@@ -382,9 +487,16 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
                     barRods: [
                       BarChartRodData(
                         toY: pct.clamp(0.0, 100.0),
-                        color: isEligible ? ChartTokens.primary : ChartTokens.error,
+                        color:
+                            !hasSessions
+                                ? ChartTokens.barBackground
+                                : isEligible
+                                ? ChartTokens.primary
+                                : ChartTokens.error,
                         width: 22,
-                        borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(6),
+                        ),
                         backDrawRodData: BackgroundBarChartRodData(
                           show: true,
                           toY: 100,
@@ -402,19 +514,77 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
     );
   }
 
+  Widget _buildErrorView() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
+            border: Border.all(color: M3Tokens.outlineVariant),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.cloud_off_outlined,
+                size: 48,
+                color: M3Tokens.outline,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Could not load attendance',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: M3Tokens.onSurface,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _errorMessage ?? 'Something went wrong. Please try again.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: M3Tokens.onSurfaceVariant,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: _fetchAttendanceData,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final overallPct = _parseDouble(_overallStats?['attendance_percentage'], 100.0);
-    final attendedTotal = _parseInt(_overallStats?['attended_sessions'], 0);
     final totalSessions = _parseInt(_overallStats?['total_sessions'], 0);
+    final hasSessions = totalSessions > 0;
+    final overallPct =
+        hasSessions
+            ? _parseDouble(_overallStats?['attendance_percentage'], 0.0)
+            : 0.0;
+    final attendedTotal = _parseInt(_overallStats?['attended_sessions'], 0);
 
-    final lowAttendanceCourses = _summaries.where((s) {
-      final pct = _parseDouble(s['attendance_percentage'], 100.0);
-      final total = _parseInt(s['total_sessions'], 0);
-      return total > 0 && pct < 75.0;
-    }).toList();
+    final lowAttendanceCourses =
+        _summaries.where((s) {
+          final pct = _parseDouble(s['attendance_percentage'], 100.0);
+          final total = _parseInt(s['total_sessions'], 0);
+          return total > 0 && pct < 75.0;
+        }).toList();
 
-    final hasShortage = (totalSessions > 0 && overallPct < 75.0) || lowAttendanceCourses.isNotEmpty;
+    final hasShortage =
+        (hasSessions && overallPct < 75.0) || lowAttendanceCourses.isNotEmpty;
 
     return Scaffold(
       backgroundColor: M3Tokens.surface,
@@ -431,262 +601,367 @@ class _AttendanceDashboardScreenState extends State<AttendanceDashboardScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _fetchAttendanceData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Low Attendance Warning Banner
-                    if (hasShortage) ...[
+      body:
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _errorMessage != null
+              ? _buildErrorView()
+              : RefreshIndicator(
+                onRefresh: _fetchAttendanceData,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Low Attendance Warning Banner
+                      if (hasShortage) ...[
+                        Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF3E0),
+                            borderRadius: BorderRadius.circular(
+                              M3Tokens.shapeMedium,
+                            ),
+                            border: Border.all(color: const Color(0xFFFFB74D)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.warning_amber_rounded,
+                                color: Color(0xFFE65100),
+                                size: 24,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Attendance Shortage Warning',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                        color: Color(0xFFE65100),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      lowAttendanceCourses.isNotEmpty
+                                          ? 'You have attendance below 75% in ${lowAttendanceCourses.map((c) => c['course_code']).join(', ')}. Please attend upcoming lectures to avoid exam debarment.'
+                                          : 'Your cumulative attendance is currently below the mandatory 75% threshold.',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF5D4037),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      // 1. Overall Summary Metric Card
                       Container(
                         width: double.infinity,
-                        margin: const EdgeInsets.only(bottom: 16),
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFF3E0),
-                          borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
-                          border: Border.all(color: const Color(0xFFFFB74D)),
+                          color: M3Tokens.primaryContainer,
+                          borderRadius: BorderRadius.circular(
+                            M3Tokens.shapeLarge,
+                          ),
                         ),
-                        child: Row(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.warning_amber_rounded, color: Color(0xFFE65100), size: 24),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Attendance Shortage Warning',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                      color: Color(0xFFE65100),
+                            const Text(
+                              'OVERALL ATTENDANCE RATE',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1,
+                                color: M3Tokens.onPrimaryContainer,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  hasSessions
+                                      ? '${_formatPercent(overallPct)}%'
+                                      : '—',
+                                  style: TextStyle(
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w800,
+                                    color:
+                                        hasSessions && overallPct < 75
+                                            ? Colors.red.shade900
+                                            : M3Tokens.onPrimaryContainer,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: M3Tokens.surface,
+                                    borderRadius: BorderRadius.circular(
+                                      M3Tokens.shapeSmall,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    lowAttendanceCourses.isNotEmpty
-                                        ? 'You have attendance below 75% in ${lowAttendanceCourses.map((c) => c['course_code']).join(', ')}. Please attend upcoming lectures to avoid exam debarment.'
-                                        : 'Your cumulative attendance is currently below the mandatory 75% threshold.',
-                                    style: const TextStyle(fontSize: 12, color: Color(0xFF5D4037)),
+                                  child: Text(
+                                    hasSessions
+                                        ? '$attendedTotal / $totalSessions Sessions'
+                                        : 'No sessions yet',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: M3Tokens.primary,
+                                    ),
                                   ),
-                                ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value:
+                                    hasSessions
+                                        ? (overallPct / 100.0).clamp(0.0, 1.0)
+                                        : 0.0,
+                                minHeight: 8,
+                                backgroundColor: M3Tokens.surface.withValues(
+                                  alpha: 0.5,
+                                ),
+                                color:
+                                    !hasSessions
+                                        ? M3Tokens.outlineVariant
+                                        : overallPct >= 75
+                                        ? Colors.green
+                                        : Colors.red,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ],
+                      const SizedBox(height: 20),
 
-                    // 1. Overall Summary Metric Card
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: M3Tokens.primaryContainer,
-                        borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'OVERALL ATTENDANCE RATE',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1,
-                              color: M3Tokens.onPrimaryContainer,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                '$overallPct%',
-                                style: TextStyle(
-                                  fontSize: 36,
-                                  fontWeight: FontWeight.w800,
-                                  color: overallPct < 75 ? Colors.red.shade900 : M3Tokens.onPrimaryContainer,
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: M3Tokens.surface,
-                                  borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
-                                ),
-                                child: Text(
-                                  '$attendedTotal / $totalSessions Sessions',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                    color: M3Tokens.primary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: (overallPct / 100.0).clamp(0.0, 1.0),
-                              minHeight: 8,
-                              backgroundColor: M3Tokens.surface.withValues(alpha: 0.5),
-                              color: overallPct >= 75 ? Colors.green : Colors.red,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
+                      // 2. Visual Analytics: fl_chart Subject Attendance Bar Chart
+                      _buildAttendanceBarChart(),
 
-                    // 2. Visual Analytics: fl_chart Subject Attendance Bar Chart
-                    _buildAttendanceBarChart(),
-
-                    // 3. Per-Subject Breakdown
-                    const Text(
-                      'Enrolled Subjects Breakdown',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: M3Tokens.onSurface),
-                    ),
-                    const SizedBox(height: 12),
-
-                    if (_summaries.isEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(32),
-                        decoration: BoxDecoration(
-                          color: M3Tokens.surfaceVariant,
-                          borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
+                      // 3. Per-Subject Breakdown
+                      const Text(
+                        'Enrolled Subjects Breakdown',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: M3Tokens.onSurface,
                         ),
-                        child: const Center(
-                          child: Text(
-                            'No enrolled courses found.\nJoin a section to see attendance analytics.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: M3Tokens.onSurfaceVariant),
-                          ),
-                        ),
-                      )
-                    else
-                      ..._summaries.map((s) {
-                        final pct = _parseDouble(s['attendance_percentage'], 100.0);
-                        final attended = _parseInt(s['attended_sessions'], 0);
-                        final total = _parseInt(s['total_sessions'], 0);
-                        final isCourseShortage = total > 0 && pct < 75.0;
+                      ),
+                      const SizedBox(height: 12),
 
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
-                            side: BorderSide(
-                              color: isCourseShortage ? Colors.red.shade200 : M3Tokens.outlineVariant,
-                              width: isCourseShortage ? 1.5 : 1.0,
+                      if (_summaries.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(32),
+                          decoration: BoxDecoration(
+                            color: M3Tokens.surfaceVariant,
+                            borderRadius: BorderRadius.circular(
+                              M3Tokens.shapeMedium,
                             ),
                           ),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
-                            onTap: () => _openCourseDrilldown(s),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16.0),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              s['course_code'] ?? '',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16,
-                                                color: M3Tokens.primary,
+                          child: const Center(
+                            child: Text(
+                              'No enrolled courses found.\nJoin a section to see attendance analytics.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: M3Tokens.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._summaries.map((s) {
+                          final total = _parseInt(s['total_sessions'], 0);
+                          final hasCourseSessions = total > 0;
+                          final pct =
+                              hasCourseSessions
+                                  ? _parseDouble(
+                                    s['attendance_percentage'],
+                                    0.0,
+                                  )
+                                  : 0.0;
+                          final attended = _parseInt(s['attended_sessions'], 0);
+                          final isCourseShortage =
+                              hasCourseSessions && pct < 75.0;
+                          final isCourseEligible =
+                              hasCourseSessions && pct >= 75.0;
+
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                M3Tokens.shapeMedium,
+                              ),
+                              side: BorderSide(
+                                color:
+                                    isCourseShortage
+                                        ? Colors.red.shade200
+                                        : M3Tokens.outlineVariant,
+                                width: isCourseShortage ? 1.5 : 1.0,
+                              ),
+                            ),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(
+                                M3Tokens.shapeMedium,
+                              ),
+                              onTap: () => _openCourseDrilldown(s),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                s['course_code'] ?? '',
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 16,
+                                                  color: M3Tokens.primary,
+                                                ),
                                               ),
-                                            ),
-                                            Text(
-                                              s['course_name'] ?? '',
-                                              style: const TextStyle(
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w500,
-                                                color: M3Tokens.onSurface,
+                                              Text(
+                                                s['course_name'] ?? '',
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: M3Tokens.onSurface,
+                                                ),
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: pct >= 75 ? Colors.green.shade50 : Colors.red.shade50,
-                                          borderRadius: BorderRadius.circular(M3Tokens.shapeSmall),
-                                          border: Border.all(
-                                            color: pct >= 75 ? Colors.green.shade200 : Colors.red.shade300,
+                                            ],
                                           ),
                                         ),
-                                        child: Text(
-                                          '$pct%',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                            color: pct >= 75 ? Colors.green.shade800 : Colors.red.shade900,
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color:
+                                                !hasCourseSessions
+                                                    ? M3Tokens.surfaceVariant
+                                                    : isCourseEligible
+                                                    ? Colors.green.shade50
+                                                    : Colors.red.shade50,
+                                            borderRadius: BorderRadius.circular(
+                                              M3Tokens.shapeSmall,
+                                            ),
+                                            border: Border.all(
+                                              color:
+                                                  !hasCourseSessions
+                                                      ? M3Tokens.outlineVariant
+                                                      : isCourseEligible
+                                                      ? Colors.green.shade200
+                                                      : Colors.red.shade300,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            hasCourseSessions
+                                                ? '${_formatPercent(pct)}%'
+                                                : '—',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                              color:
+                                                  !hasCourseSessions
+                                                      ? M3Tokens
+                                                          .onSurfaceVariant
+                                                      : isCourseEligible
+                                                      ? Colors.green.shade800
+                                                      : Colors.red.shade900,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          'Section: ${s['section_name'] ?? ""} • Teacher: ${s['teacher_name'] ?? ""}',
-                                          style: const TextStyle(fontSize: 11, color: M3Tokens.onSurfaceVariant),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            'Section: ${s['section_name'] ?? ""} • Teacher: ${s['teacher_name'] ?? ""}',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: M3Tokens.onSurfaceVariant,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '$attended / $total sessions',
-                                        style: const TextStyle(
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          hasCourseSessions
+                                              ? '$attended / $total sessions'
+                                              : 'No sessions yet',
+                                          style: const TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.bold,
-                                            color: M3Tokens.onSurfaceVariant),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(3),
-                                    child: LinearProgressIndicator(
-                                      value: total > 0 ? (attended / total).clamp(0.0, 1.0) : 1.0,
-                                      minHeight: 5,
-                                      backgroundColor: M3Tokens.surfaceVariant,
-                                      color: pct >= 75 ? Colors.green : Colors.red,
+                                            color: M3Tokens.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 8),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(3),
+                                      child: LinearProgressIndicator(
+                                        value:
+                                            hasCourseSessions
+                                                ? (attended / total).clamp(
+                                                  0.0,
+                                                  1.0,
+                                                )
+                                                : 0.0,
+                                        minHeight: 5,
+                                        backgroundColor:
+                                            M3Tokens.surfaceVariant,
+                                        color:
+                                            !hasCourseSessions
+                                                ? M3Tokens.outlineVariant
+                                                : isCourseEligible
+                                                ? Colors.green
+                                                : Colors.red,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        );
-                      }),
-                  ],
+                          );
+                        }),
+                    ],
+                  ),
                 ),
               ),
-            ),
     );
   }
 }

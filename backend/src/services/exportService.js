@@ -100,19 +100,28 @@ async function getAttendanceMatrixData(classroomId) {
 }
 
 /**
+ * Escapes a CSV cell and neutralizes spreadsheet formula injection.
+ * Cells beginning with =, +, -, @, tab, or CR are prefixed with a single quote.
+ */
+function escapeCsv(str) {
+  if (str === null || str === undefined) return '';
+
+  let val = String(str);
+  if (/^[=+\-@\t\r]/.test(val)) {
+    val = `'${val}`;
+  }
+
+  if (val.includes(',') || val.includes('"') || val.includes('\n') || val.includes('\r')) {
+    return `"${val.replace(/"/g, '""')}"`;
+  }
+  return val;
+}
+
+/**
  * Generates CSV string representation of attendance matrix.
  */
 async function generateCsv(classroomId) {
   const data = await getAttendanceMatrixData(classroomId);
-
-  const escapeCsv = (str) => {
-    if (str === null || str === undefined) return '';
-    const val = String(str);
-    if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-      return `"${val.replace(/"/g, '""')}"`;
-    }
-    return val;
-  };
 
   const lines = [];
 
@@ -306,4 +315,5 @@ module.exports = {
   getAttendanceMatrixData,
   generateCsv,
   generateExcel,
+  escapeCsv,
 };

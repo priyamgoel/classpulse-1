@@ -65,3 +65,33 @@ export function getAuthHeaders(): Record<string, string> {
   const token = getAuthToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+
+/** Decodes a base64url-encoded JWT segment into a UTF-8 string. */
+function decodeBase64Url(segment: string): string {
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized + '='.repeat(padding);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/**
+ * Returns true when a JWT is missing, malformed, has no numeric `exp`, or has
+ * already expired. A small skew (default 30s) guards against clock drift.
+ */
+export function isTokenExpired(token: string | null, skewSeconds: number = 30): boolean {
+  if (!token) return true;
+  const parts = token.split('.');
+  if (parts.length !== 3) return true;
+
+  try {
+    const payload = JSON.parse(decodeBase64Url(parts[1])) as { exp?: unknown };
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) return true;
+    const expiresAtMs = payload.exp * 1000;
+    return expiresAtMs <= Date.now() + skewSeconds * 1000;
+  } catch {
+    // Malformed tokens are treated as expired so callers clear them.
+    return true;
+  }
+}

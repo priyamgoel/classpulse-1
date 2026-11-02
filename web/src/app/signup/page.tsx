@@ -23,6 +23,7 @@ export default function SignupPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [teacherInviteCode, setTeacherInviteCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -35,7 +36,7 @@ export default function SignupPage() {
     setLoading(true);
 
     // Web signup registers teacher accounts exclusively
-    const result = await signup(email, password, fullName, 'teacher');
+    const result = await signup(email, password, fullName, 'teacher', true, teacherInviteCode);
     setLoading(false);
 
     if (result.success) {
@@ -101,6 +102,14 @@ export default function SignupPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                />
+                <TextField
+                  label="Teacher Invite Code (optional)"
+                  type="text"
+                  fullWidth
+                  value={teacherInviteCode}
+                  onChange={(e) => setTeacherInviteCode(e.target.value)}
+                  helperText="Provided by your administrator when instructor signup is restricted."
                 />
 
                 <Button

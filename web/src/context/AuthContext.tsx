@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { getAuthToken, getStoredUser, persistAuth, clearAuthStorage, isTokenExpired } from '@/lib/authStorage';
 
 export interface User {
   id: string;
@@ -15,7 +16,7 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean; error?: string }>;
-  signup: (email: string, password: string, full_name: string, role: 'teacher' | 'student', rememberMe?: boolean) => Promise<{ success: boolean; error?: string }>;
+  signup: (email: string, password: string, full_name: string, role: 'teacher' | 'student', rememberMe?: boolean, teacherInviteCode?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
@@ -30,22 +31,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     // Check persistent storage first, then fall back to session storage
-    const storedToken = localStorage.getItem('classpulse_token') || sessionStorage.getItem('classpulse_token');
-    const storedUser = localStorage.getItem('classpulse_user') || sessionStorage.getItem('classpulse_user');
+    const storedToken = getAuthToken();
+    const storedUser = getStoredUser<User>();
 
     if (storedToken && storedUser) {
-      setToken(storedToken);
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch {
-        localStorage.removeItem('classpulse_token');
-        localStorage.removeItem('classpulse_user');
-        sessionStorage.removeItem('classpulse_token');
-        sessionStorage.removeItem('classpulse_user');
+      // The web dashboard is instructor-only: never restore a student session.
+      if (isTokenExpired(storedToken) || storedUser.role !== 'teacher') {
+        clearAuthStorage();
+      } else {
+        setToken(storedToken);
+        setUser(storedUser);
       }
+    } else if (storedToken || storedUser) {
+      // Clean up a partially-written or malformed session
+      clearAuthStorage();
     }
     setLoading(false);
   }, []);
+
+  // If the JWT expires while the dashboard is open, drop the session so the
+  // page's auth guard can redirect instead of leaving stale 401-driven UI.
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const checkExpiry = () => {
+      if (isTokenExpired(token)) {
+        clearAuthStorage();
+        setToken(null);
+        setUser(null);
+      }
+    };
+
+    const interval = window.setInterval(checkExpiry, 60_000);
+    document.addEventListener('visibilitychange', checkExpiry);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', checkExpiry);
+    };
+  }, [token]);
 
   const login = async (email: string, password: string, rememberMe: boolean = true) => {
     try {
@@ -63,17 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(data.token);
       setUser(data.user);
 
-      if (rememberMe) {
-        localStorage.setItem('classpulse_token', data.token);
-        localStorage.setItem('classpulse_user', JSON.stringify(data.user));
-        sessionStorage.removeItem('classpulse_token');
-        sessionStorage.removeItem('classpulse_user');
-      } else {
-        sessionStorage.setItem('classpulse_token', data.token);
-        sessionStorage.setItem('classpulse_user', JSON.stringify(data.user));
-        localStorage.removeItem('classpulse_token');
-        localStorage.removeItem('classpulse_user');
-      }
+      persistAuth(data.token, data.user, rememberMe);
 
       return { success: true };
     } catch {
@@ -86,13 +100,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     password: string,
     full_name: string,
     role: 'teacher' | 'student',
-    rememberMe: boolean = true
+    rememberMe: boolean = true,
+    teacherInviteCode?: string
   ) => {
     try {
+      const body: Record<string, unknown> = { email, password, full_name, role };
+      if (role === 'teacher' && teacherInviteCode?.trim()) {
+        body.teacher_invite_code = teacherInviteCode.trim();
+      }
+
       const response = await fetch(`${API_BASE_URL}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, full_name, role }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -103,17 +123,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(data.token);
       setUser(data.user);
 
-      if (rememberMe) {
-        localStorage.setItem('classpulse_token', data.token);
-        localStorage.setItem('classpulse_user', JSON.stringify(data.user));
-        sessionStorage.removeItem('classpulse_token');
-        sessionStorage.removeItem('classpulse_user');
-      } else {
-        sessionStorage.setItem('classpulse_token', data.token);
-        sessionStorage.setItem('classpulse_user', JSON.stringify(data.user));
-        localStorage.removeItem('classpulse_token');
-        localStorage.removeItem('classpulse_user');
-      }
+      persistAuth(data.token, data.user, rememberMe);
 
       return { success: true };
     } catch {
@@ -124,10 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('classpulse_token');
-    localStorage.removeItem('classpulse_user');
-    sessionStorage.removeItem('classpulse_token');
-    sessionStorage.removeItem('classpulse_user');
+    clearAuthStorage();
   };
 
   return (

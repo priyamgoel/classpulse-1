@@ -3,6 +3,62 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { getOrAssignPseudonym } = require('../utils/pseudonym');
+const { checkProfanity } = require('../utils/profanityFilter');
+const { resolveDoubtAccess, getClassroom, isEnrolled, isCourseMember } = require('../utils/access');
+
+const MAX_TITLE_LENGTH = 255;
+const MAX_BODY_LENGTH = 10000;
+
+/**
+ * SQL predicate that limits doubt posts to the ones the requester is allowed
+ * to see. `userIdParam` is a positional parameter placeholder such as '$1'.
+ */
+function buildAccessPredicate(userIdParam, role) {
+  if (role === 'teacher') {
+    return `(
+      dp.audience_scope = 'APP'
+      OR (dp.audience_scope = 'CLASSROOM' AND dp.classroom_id IN (
+        SELECT id FROM classrooms WHERE teacher_id = ${userIdParam}
+      ))
+      OR (dp.audience_scope = 'COURSE' AND dp.course_id IN (
+        SELECT course_id FROM classrooms WHERE teacher_id = ${userIdParam}
+      ))
+    )`;
+  }
+
+  return `(
+    dp.audience_scope = 'APP'
+    OR (dp.audience_scope = 'CLASSROOM' AND dp.classroom_id IN (
+      SELECT classroom_id FROM enrollments WHERE student_id = ${userIdParam}
+    ))
+    OR (dp.audience_scope = 'COURSE' AND dp.course_id IN (
+      SELECT c.course_id
+      FROM enrollments e
+      JOIN classrooms c ON e.classroom_id = c.id
+      WHERE e.student_id = ${userIdParam}
+    ))
+  )`;
+}
+
+async function fetchPostAccessRow(postId) {
+  const result = await db.query(
+    'SELECT id, author_id, course_id, classroom_id, audience_scope FROM doubt_posts WHERE id = $1',
+    [postId]
+  );
+  return result.rows[0] || null;
+}
+
+async function fetchReplyAccessRow(replyId) {
+  const result = await db.query(
+    `SELECT dr.id, dr.doubt_post_id, dr.author_id, dr.is_solution,
+            dp.author_id AS post_author_id, dp.course_id, dp.classroom_id, dp.audience_scope
+     FROM doubt_replies dr
+     JOIN doubt_posts dp ON dr.doubt_post_id = dp.id
+     WHERE dr.id = $1`,
+    [replyId]
+  );
+  return result.rows[0] || null;
+}
 
 /**
  * GET /doubts
@@ -20,9 +76,13 @@ router.get('/', authenticateToken, async (req, res) => {
       search,
     } = req.query;
 
-    let conditions = ['1=1'];
-    let params = [];
-    let paramIdx = 1;
+    const currentUserIdParam = '$1';
+    let params = [req.user.id];
+    let paramIdx = 2;
+
+    // The access predicate is always present and cannot be removed by client
+    // supplied scope/course/classroom filters.
+    let conditions = [buildAccessPredicate(currentUserIdParam, req.user.role)];
 
     // Scope & Audience filtering
     if (scope === 'APP') {
@@ -36,11 +96,22 @@ router.get('/', authenticateToken, async (req, res) => {
       conditions.push(`(dp.classroom_id = $${paramIdx} OR (dp.course_id = (SELECT course_id FROM classrooms WHERE id = $${paramIdx}) AND dp.audience_scope IN ('APP', 'COURSE')))`);
       params.push(classroom_id);
       paramIdx++;
+      if (course_id) {
+        conditions.push(`dp.course_id = $${paramIdx}`);
+        params.push(course_id);
+        paramIdx++;
+      }
     } else if (classroom_id) {
       // Default classroom context view: show classroom + course + app scope
       conditions.push(`(dp.classroom_id = $${paramIdx} OR dp.audience_scope IN ('APP', 'COURSE'))`);
       params.push(classroom_id);
       paramIdx++;
+      // Do not drop an explicitly requested course filter.
+      if (course_id) {
+        conditions.push(`dp.course_id = $${paramIdx}`);
+        params.push(course_id);
+        paramIdx++;
+      }
     } else if (course_id) {
       conditions.push(`(dp.course_id = $${paramIdx} OR dp.audience_scope = 'APP')`);
       params.push(course_id);
@@ -68,6 +139,23 @@ router.get('/', authenticateToken, async (req, res) => {
       paramIdx++;
     }
 
+    // Pagination. The forum is bounded so a single request cannot scan the
+    // entire table, while still returning a useful default page.
+    const parsedLimit = req.query.limit === undefined ? 100 : Number.parseInt(req.query.limit, 10);
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+      return res.status(400).json({ error: 'limit must be an integer between 1 and 200' });
+    }
+    const parsedOffset = req.query.offset === undefined ? 0 : Number.parseInt(req.query.offset, 10);
+    if (!Number.isInteger(parsedOffset) || parsedOffset < 0) {
+      return res.status(400).json({ error: 'offset must be an integer greater than or equal to 0' });
+    }
+
+    const limitParam = `$${paramIdx}`;
+    params.push(parsedLimit);
+    paramIdx++;
+    const offsetParam = `$${paramIdx}`;
+    params.push(parsedOffset);
+
     // Sorting
     let orderBy = 'dp.created_at DESC';
     if (sort_by === 'helpful') {
@@ -75,10 +163,6 @@ router.get('/', authenticateToken, async (req, res) => {
     } else if (sort_by === 'unanswered') {
       orderBy = 'reply_count ASC, dp.created_at DESC';
     }
-
-    // Add current user id for helpful state check
-    const currentUserIdParam = `$${paramIdx}`;
-    params.push(req.user.id);
 
     const query = `
       SELECT dp.id, dp.course_id, dp.classroom_id, dp.topic_id, dp.author_id,
@@ -102,26 +186,29 @@ router.get('/', authenticateToken, async (req, res) => {
       WHERE ${conditions.join(' AND ')}
       GROUP BY dp.id, ct.name, c.course_code, c.course_name, u.full_name, u.role
       ORDER BY ${orderBy}
+      LIMIT ${limitParam} OFFSET ${offsetParam}
     `;
 
     const result = await db.query(query, params);
 
-    // Apply anonymity masking for list responses
+    // Apply anonymity masking for list responses. The access predicate already
+    // guarantees a teacher only sees posts from classrooms/courses they teach.
     const posts = result.rows.map((post) => {
       const isAuthor = post.author_id === req.user.id;
       const isTeacher = req.user.role === 'teacher';
+      const canSeeIdentity = isAuthor || isTeacher;
 
       return {
         ...post,
         author_display_name: post.is_anonymous
           ? (post.pseudonym || 'Anonymous Peer')
           : post.author_real_name,
-        // Only include real name if not anonymous, or if requester is author/teacher
-        author_real_name: (!post.is_anonymous || isAuthor || isTeacher) ? post.author_real_name : null,
+        author_real_name: (!post.is_anonymous || canSeeIdentity) ? post.author_real_name : null,
+        author_id: (!post.is_anonymous || canSeeIdentity) ? post.author_id : null,
       };
     });
 
-    res.json({ posts });
+    res.json({ posts, limit: parsedLimit, offset: parsedOffset });
   } catch (err) {
     console.error('[ClassPulse Doubts] Error fetching doubts:', err);
     res.status(500).json({ error: 'Failed to fetch doubt posts' });
@@ -152,8 +239,71 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Invalid audience_scope. Must be APP, COURSE, or CLASSROOM.' });
     }
 
+    if (typeof title !== 'string' || typeof body !== 'string') {
+      return res.status(400).json({ error: 'Title and body must be strings' });
+    }
+
+    const cleanTitle = title.trim();
+    const cleanBody = body.trim();
+
+    if (cleanTitle.length === 0 || cleanTitle.length > MAX_TITLE_LENGTH) {
+      return res.status(400).json({ error: `Title must be between 1 and ${MAX_TITLE_LENGTH} characters` });
+    }
+
+    if (cleanBody.length === 0 || cleanBody.length > MAX_BODY_LENGTH) {
+      return res.status(400).json({ error: `Body must be between 1 and ${MAX_BODY_LENGTH} characters` });
+    }
+
+    const profanity = checkProfanity(`${cleanTitle} ${cleanBody}`);
+    if (profanity.isBlocked) {
+      return res.status(400).json({
+        error: 'Your post contains language that is not allowed in the doubt forum. Please revise it.',
+      });
+    }
+
+    const courseRes = await db.query('SELECT id FROM courses WHERE id = $1', [course_id]);
+    if (courseRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    if (audience_scope === 'CLASSROOM') {
+      if (!classroom_id) {
+        return res.status(400).json({ error: 'classroom_id is required for CLASSROOM scope' });
+      }
+      const classroom = await getClassroom(classroom_id);
+      if (!classroom) {
+        return res.status(404).json({ error: 'Classroom not found' });
+      }
+      if (classroom.course_id !== course_id) {
+        return res.status(400).json({ error: 'The selected classroom does not belong to this course' });
+      }
+      const canAccess = req.user.role === 'teacher'
+        ? classroom.teacher_id === req.user.id
+        : await isEnrolled(req.user.id, classroom_id);
+      if (!canAccess) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this classroom' });
+      }
+    } else if (audience_scope === 'COURSE') {
+      const isMember = await isCourseMember(req.user, course_id);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Forbidden: You are not a member of this course' });
+      }
+    }
+
+    if (topic_id) {
+      const topicRes = await db.query(
+        'SELECT id FROM course_topics WHERE id = $1 AND course_id = $2',
+        [topic_id, course_id]
+      );
+      if (topicRes.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid topic for the selected course' });
+      }
+    }
+
+    const anonymous = is_anonymous === true || is_anonymous === 'true' || is_anonymous === 1 || is_anonymous === '1';
+
     let pseudonym = null;
-    if (is_anonymous) {
+    if (anonymous) {
       pseudonym = await getOrAssignPseudonym(req.user.id, course_id);
     }
 
@@ -170,9 +320,9 @@ router.post('/', authenticateToken, async (req, res) => {
         topic_id || null,
         req.user.id,
         audience_scope,
-        title.trim(),
-        body.trim(),
-        is_anonymous,
+        cleanTitle,
+        cleanBody,
+        anonymous,
         pseudonym,
       ]
     );
@@ -223,6 +373,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     const post = postRes.rows[0];
+    const access = await resolveDoubtAccess(req.user, post);
+
+    if (!access.canView) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this doubt post' });
+    }
 
     // Fetch replies
     const repliesRes = await db.query(
@@ -239,17 +394,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
       [postId, req.user.id]
     );
 
-    const isTeacher = req.user.role === 'teacher';
-    const isPostAuthor = post.author_id === req.user.id;
+    const canSeeIdentity = access.isAuthor || access.isTeacher;
 
     const replies = repliesRes.rows.map((r) => {
       const isReplyAuthor = r.author_id === req.user.id;
+      const canSeeReplyIdentity = isReplyAuthor || access.isTeacher;
+
       return {
         ...r,
         author_display_name: r.is_anonymous
           ? (r.pseudonym || 'Anonymous Peer')
           : r.author_real_name,
-        author_real_name: (!r.is_anonymous || isReplyAuthor || isTeacher) ? r.author_real_name : null,
+        author_real_name: (!r.is_anonymous || canSeeReplyIdentity) ? r.author_real_name : null,
+        author_id: (!r.is_anonymous || canSeeReplyIdentity) ? r.author_id : null,
       };
     });
 
@@ -259,10 +416,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
         author_display_name: post.is_anonymous
           ? (post.pseudonym || 'Anonymous Peer')
           : post.author_real_name,
-        author_real_name: (!post.is_anonymous || isPostAuthor || isTeacher) ? post.author_real_name : null,
+        author_real_name: (!post.is_anonymous || canSeeIdentity) ? post.author_real_name : null,
+        author_id: (!post.is_anonymous || canSeeIdentity) ? post.author_id : null,
+        author_email: (!post.is_anonymous || canSeeIdentity) ? post.author_email : null,
       },
       replies,
-      canRevealAuthor: isTeacher,
+      canRevealAuthor: Boolean(access.isTeacher && access.canModify),
     });
   } catch (err) {
     console.error('[ClassPulse Doubts] Error fetching doubt details:', err);
@@ -283,17 +442,30 @@ router.post('/:id/replies', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Reply body is required' });
     }
 
-    // Verify post exists
-    const postRes = await db.query('SELECT course_id FROM doubt_posts WHERE id = $1', [postId]);
-    if (postRes.rows.length === 0) {
+    if (body.trim().length > MAX_BODY_LENGTH) {
+      return res.status(400).json({ error: `Reply body must be ${MAX_BODY_LENGTH} characters or fewer` });
+    }
+
+    const profanity = checkProfanity(body);
+    if (profanity.isBlocked) {
+      return res.status(400).json({
+        error: 'Your reply contains language that is not allowed in the doubt forum. Please revise it.',
+      });
+    }
+
+    const post = await fetchPostAccessRow(postId);
+    if (!post) {
       return res.status(404).json({ error: 'Doubt post not found' });
     }
 
-    const courseId = postRes.rows[0].course_id;
+    const access = await resolveDoubtAccess(req.user, post);
+    if (!access.canView) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this doubt post' });
+    }
 
     let pseudonym = null;
     if (is_anonymous) {
-      pseudonym = await getOrAssignPseudonym(req.user.id, courseId);
+      pseudonym = await getOrAssignPseudonym(req.user.id, post.course_id);
     }
 
     const isTeacher = req.user.role === 'teacher';
@@ -332,7 +504,8 @@ router.post('/:id/reveal-author', authenticateToken, requireRole('teacher'), asy
     const postId = req.params.id;
 
     const result = await db.query(
-      `SELECT u.id, u.full_name, u.email, u.role,
+      `SELECT dp.author_id, dp.course_id, dp.classroom_id, dp.audience_scope,
+              u.id, u.full_name, u.email, u.role,
               dp.is_anonymous, dp.pseudonym, dp.title, dp.created_at
        FROM doubt_posts dp
        JOIN users u ON dp.author_id = u.id
@@ -344,8 +517,29 @@ router.post('/:id/reveal-author', authenticateToken, requireRole('teacher'), asy
       return res.status(404).json({ error: 'Doubt post not found' });
     }
 
+    const row = result.rows[0];
+    const access = await resolveDoubtAccess(req.user, {
+      author_id: row.author_id,
+      course_id: row.course_id,
+      classroom_id: row.classroom_id,
+      audience_scope: row.audience_scope,
+    });
+
+    if (!access.isTeacher || !access.canModify) {
+      return res.status(403).json({ error: 'Forbidden: You cannot moderate this doubt post' });
+    }
+
     res.json({
-      author: result.rows[0],
+      author: {
+        id: row.id,
+        full_name: row.full_name,
+        email: row.email,
+        role: row.role,
+        is_anonymous: row.is_anonymous,
+        pseudonym: row.pseudonym,
+        title: row.title,
+        created_at: row.created_at,
+      },
     });
   } catch (err) {
     console.error('[ClassPulse Doubts] Error revealing author:', err);
@@ -365,41 +559,89 @@ router.post('/helpful', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'target_type (POST/REPLY) and target_id are required' });
     }
 
-    const table = target_type === 'POST' ? 'doubt_posts' : 'doubt_replies';
+    let table;
+    let access;
 
-    // Check if user already marked helpful
-    const checkRes = await db.query(
-      'SELECT id FROM doubt_helpful_marks WHERE user_id = $1 AND target_type = $2 AND target_id = $3',
-      [req.user.id, target_type, target_id]
-    );
+    if (target_type === 'POST') {
+      const postRes = await db.query(
+        'SELECT id, author_id, course_id, classroom_id, audience_scope FROM doubt_posts WHERE id = $1',
+        [target_id]
+      );
+      if (postRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Doubt post not found' });
+      }
+      access = await resolveDoubtAccess(req.user, postRes.rows[0]);
+      table = 'doubt_posts';
+    } else {
+      const replyRes = await db.query(
+        `SELECT dr.id, dr.doubt_post_id,
+                dp.author_id, dp.course_id, dp.classroom_id, dp.audience_scope
+         FROM doubt_replies dr
+         JOIN doubt_posts dp ON dr.doubt_post_id = dp.id
+         WHERE dr.id = $1`,
+        [target_id]
+      );
+      if (replyRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Reply not found' });
+      }
+      const row = replyRes.rows[0];
+      access = await resolveDoubtAccess(req.user, {
+        author_id: row.author_id,
+        course_id: row.course_id,
+        classroom_id: row.classroom_id,
+        audience_scope: row.audience_scope,
+      });
+      table = 'doubt_replies';
+    }
 
+    if (!access.canView) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this doubt' });
+    }
+
+    const client = await db.pool.connect();
     let marked = false;
     let newCount = 0;
 
-    if (checkRes.rows.length > 0) {
-      // Remove mark
-      await db.query(
-        'DELETE FROM doubt_helpful_marks WHERE user_id = $1 AND target_type = $2 AND target_id = $3',
+    try {
+      await client.query('BEGIN');
+
+      const checkRes = await client.query(
+        'SELECT id FROM doubt_helpful_marks WHERE user_id = $1 AND target_type = $2 AND target_id = $3',
         [req.user.id, target_type, target_id]
       );
-      const updateRes = await db.query(
-        `UPDATE ${table} SET helpful_count = GREATEST(0, helpful_count - 1) WHERE id = $1 RETURNING helpful_count`,
-        [target_id]
-      );
-      marked = false;
-      newCount = updateRes.rows[0]?.helpful_count || 0;
-    } else {
-      // Add mark
-      await db.query(
-        'INSERT INTO doubt_helpful_marks (user_id, target_type, target_id) VALUES ($1, $2, $3)',
-        [req.user.id, target_type, target_id]
-      );
-      const updateRes = await db.query(
-        `UPDATE ${table} SET helpful_count = helpful_count + 1 WHERE id = $1 RETURNING helpful_count`,
-        [target_id]
-      );
-      marked = true;
-      newCount = updateRes.rows[0]?.helpful_count || 1;
+
+      if (checkRes.rows.length > 0) {
+        // Remove mark
+        await client.query(
+          'DELETE FROM doubt_helpful_marks WHERE user_id = $1 AND target_type = $2 AND target_id = $3',
+          [req.user.id, target_type, target_id]
+        );
+        const updateRes = await client.query(
+          `UPDATE ${table} SET helpful_count = GREATEST(0, helpful_count - 1) WHERE id = $1 RETURNING helpful_count`,
+          [target_id]
+        );
+        marked = false;
+        newCount = updateRes.rows[0]?.helpful_count || 0;
+      } else {
+        // Add mark
+        await client.query(
+          'INSERT INTO doubt_helpful_marks (user_id, target_type, target_id) VALUES ($1, $2, $3)',
+          [req.user.id, target_type, target_id]
+        );
+        const updateRes = await client.query(
+          `UPDATE ${table} SET helpful_count = helpful_count + 1 WHERE id = $1 RETURNING helpful_count`,
+          [target_id]
+        );
+        marked = true;
+        newCount = updateRes.rows[0]?.helpful_count || 1;
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
 
     res.json({
@@ -420,24 +662,20 @@ router.post('/replies/:id/accept-solution', authenticateToken, async (req, res) 
   try {
     const replyId = req.params.id;
 
-    // Verify reply and parent post ownership
-    const checkRes = await db.query(
-      `SELECT dr.*, dp.author_id as post_author_id
-       FROM doubt_replies dr
-       JOIN doubt_posts dp ON dr.doubt_post_id = dp.id
-       WHERE dr.id = $1`,
-      [replyId]
-    );
-
-    if (checkRes.rows.length === 0) {
+    const reply = await fetchReplyAccessRow(replyId);
+    if (!reply) {
       return res.status(404).json({ error: 'Reply not found' });
     }
 
-    const reply = checkRes.rows[0];
-    const isPostAuthor = reply.post_author_id === req.user.id;
-    const isTeacher = req.user.role === 'teacher';
+    const access = await resolveDoubtAccess(req.user, {
+      author_id: reply.post_author_id,
+      course_id: reply.course_id,
+      classroom_id: reply.classroom_id,
+      audience_scope: reply.audience_scope,
+    });
 
-    if (!isPostAuthor && !isTeacher) {
+    const isPostAuthor = reply.post_author_id === req.user.id;
+    if (!isPostAuthor && !access.isTeacher) {
       return res.status(403).json({ error: 'Only the doubt author or a teacher can accept a solution' });
     }
 
@@ -485,6 +723,22 @@ router.post('/replies/:id/endorse', authenticateToken, requireRole('teacher'), a
   try {
     const replyId = req.params.id;
 
+    const reply = await fetchReplyAccessRow(replyId);
+    if (!reply) {
+      return res.status(404).json({ error: 'Reply not found' });
+    }
+
+    const access = await resolveDoubtAccess(req.user, {
+      author_id: reply.post_author_id,
+      course_id: reply.course_id,
+      classroom_id: reply.classroom_id,
+      audience_scope: reply.audience_scope,
+    });
+
+    if (!access.isTeacher) {
+      return res.status(403).json({ error: 'Forbidden: You cannot moderate this doubt post' });
+    }
+
     const replyRes = await db.query('SELECT * FROM doubt_replies WHERE id = $1', [replyId]);
     if (replyRes.rows.length === 0) {
       return res.status(404).json({ error: 'Reply not found' });
@@ -509,21 +763,19 @@ router.post('/replies/:id/endorse', authenticateToken, requireRole('teacher'), a
 
 /**
  * DELETE /doubts/:id
- * Delete a doubt post (author or teacher).
+ * Delete a doubt post (author or teacher who can moderate it).
  */
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const postId = req.params.id;
 
-    const checkRes = await db.query('SELECT author_id FROM doubt_posts WHERE id = $1', [postId]);
-    if (checkRes.rows.length === 0) {
+    const post = await fetchPostAccessRow(postId);
+    if (!post) {
       return res.status(404).json({ error: 'Doubt post not found' });
     }
 
-    const isAuthor = checkRes.rows[0].author_id === req.user.id;
-    const isTeacher = req.user.role === 'teacher';
-
-    if (!isAuthor && !isTeacher) {
+    const access = await resolveDoubtAccess(req.user, post);
+    if (!access.canModify) {
       return res.status(403).json({ error: 'You do not have permission to delete this doubt post' });
     }
 
@@ -554,26 +806,26 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
 /**
  * DELETE /doubts/replies/:id
- * Delete a doubt reply (reply author or teacher).
+ * Delete a doubt reply (reply author or teacher who can moderate the post).
  */
 router.delete('/replies/:id', authenticateToken, async (req, res) => {
   try {
     const replyId = req.params.id;
 
-    const checkRes = await db.query(
-      'SELECT id, doubt_post_id, author_id, is_solution FROM doubt_replies WHERE id = $1',
-      [replyId]
-    );
-
-    if (checkRes.rows.length === 0) {
+    const reply = await fetchReplyAccessRow(replyId);
+    if (!reply) {
       return res.status(404).json({ error: 'Reply not found' });
     }
 
-    const reply = checkRes.rows[0];
-    const isAuthor = reply.author_id === req.user.id;
-    const isTeacher = req.user.role === 'teacher';
+    const access = await resolveDoubtAccess(req.user, {
+      author_id: reply.post_author_id,
+      course_id: reply.course_id,
+      classroom_id: reply.classroom_id,
+      audience_scope: reply.audience_scope,
+    });
 
-    if (!isAuthor && !isTeacher) {
+    const isAuthor = reply.author_id === req.user.id;
+    if (!isAuthor && !access.isTeacher) {
       return res.status(403).json({ error: 'You do not have permission to delete this reply' });
     }
 
@@ -604,26 +856,24 @@ router.delete('/replies/:id', authenticateToken, async (req, res) => {
 
 /**
  * PUT /doubts/:id
- * Edit an existing doubt post title or body (author or teacher).
+ * Edit an existing doubt post title or body (author or teacher who can moderate).
  */
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const postId = req.params.id;
     const { title, body } = req.body;
 
-    const checkRes = await db.query('SELECT author_id FROM doubt_posts WHERE id = $1', [postId]);
-    if (checkRes.rows.length === 0) {
+    const post = await fetchPostAccessRow(postId);
+    if (!post) {
       return res.status(404).json({ error: 'Doubt post not found' });
     }
 
-    const isAuthor = checkRes.rows[0].author_id === req.user.id;
-    const isTeacher = req.user.role === 'teacher';
-
-    if (!isAuthor && !isTeacher) {
+    const access = await resolveDoubtAccess(req.user, post);
+    if (!access.canModify) {
       return res.status(403).json({ error: 'You do not have permission to edit this doubt post' });
     }
 
-    if (!title && !body) {
+    if (title === undefined && body === undefined) {
       return res.status(400).json({ error: 'At least title or body is required to update' });
     }
 
@@ -631,13 +881,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
     let params = [postId];
     let idx = 2;
 
-    if (title && title.trim()) {
+    if (title !== undefined) {
+      if (typeof title !== 'string' || title.trim().length === 0 || title.trim().length > MAX_TITLE_LENGTH) {
+        return res.status(400).json({ error: `Title must be between 1 and ${MAX_TITLE_LENGTH} characters` });
+      }
       updateFields.push(`title = $${idx}`);
       params.push(title.trim());
       idx++;
     }
 
-    if (body && body.trim()) {
+    if (body !== undefined) {
+      if (typeof body !== 'string' || body.trim().length === 0 || body.trim().length > MAX_BODY_LENGTH) {
+        return res.status(400).json({ error: `Body must be between 1 and ${MAX_BODY_LENGTH} characters` });
+      }
       updateFields.push(`body = $${idx}`);
       params.push(body.trim());
       idx++;
@@ -659,26 +915,42 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
 /**
  * PUT /doubts/replies/:id
- * Edit an existing reply body (author or teacher).
+ * Edit an existing reply body (author or teacher who can moderate the post).
  */
 router.put('/replies/:id', authenticateToken, async (req, res) => {
   try {
     const replyId = req.params.id;
     const { body } = req.body;
 
-    if (!body || !body.trim()) {
+    if (!body || typeof body !== 'string' || !body.trim()) {
       return res.status(400).json({ error: 'Reply body cannot be empty' });
     }
 
-    const checkRes = await db.query('SELECT author_id FROM doubt_replies WHERE id = $1', [replyId]);
-    if (checkRes.rows.length === 0) {
+    if (body.trim().length > MAX_BODY_LENGTH) {
+      return res.status(400).json({ error: `Reply body must be ${MAX_BODY_LENGTH} characters or fewer` });
+    }
+
+    const profanity = checkProfanity(body);
+    if (profanity.isBlocked) {
+      return res.status(400).json({
+        error: 'Your reply contains language that is not allowed in the doubt forum. Please revise it.',
+      });
+    }
+
+    const reply = await fetchReplyAccessRow(replyId);
+    if (!reply) {
       return res.status(404).json({ error: 'Reply not found' });
     }
 
-    const isAuthor = checkRes.rows[0].author_id === req.user.id;
-    const isTeacher = req.user.role === 'teacher';
+    const access = await resolveDoubtAccess(req.user, {
+      author_id: reply.post_author_id,
+      course_id: reply.course_id,
+      classroom_id: reply.classroom_id,
+      audience_scope: reply.audience_scope,
+    });
 
-    if (!isAuthor && !isTeacher) {
+    const isAuthor = reply.author_id === req.user.id;
+    if (!isAuthor && !access.isTeacher) {
       return res.status(403).json({ error: 'You do not have permission to edit this reply' });
     }
 
@@ -695,5 +967,3 @@ router.put('/replies/:id', authenticateToken, async (req, res) => {
 });
 
 module.exports = router;
-
-

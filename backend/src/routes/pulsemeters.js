@@ -4,6 +4,10 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
 
+const parsedLinkWindow = parseInt(process.env.ATTENDANCE_LINK_WINDOW_HOURS || '12', 10);
+const ATTENDANCE_LINK_WINDOW_HOURS =
+  Number.isFinite(parsedLinkWindow) && parsedLinkWindow >= 0 ? parsedLinkWindow : 12;
+
 /**
  * POST /pulsemeters
  * Role: Teacher
@@ -170,13 +174,16 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
     }
 
     // Present-vs-responded resolution (Section 4b):
-    // Look for the most recent ENDED attendance Session in this classroom
+    // Look for the most recent ENDED attendance session in this classroom that
+    // ended inside the linking window. A stale session must not silently
+    // provide present/absent data for a brand-new activity.
     const recentSession = await db.query(
       `SELECT id FROM sessions
        WHERE classroom_id = $1 AND ended_at IS NOT NULL
+         AND ended_at > now() - ($2 || ' hours')::interval
        ORDER BY started_at DESC
        LIMIT 1`,
-      [pm.classroom_id]
+      [pm.classroom_id, String(ATTENDANCE_LINK_WINDOW_HOURS)]
     );
 
     let attendanceSessionId = null;

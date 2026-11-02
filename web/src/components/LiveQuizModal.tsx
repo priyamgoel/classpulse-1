@@ -49,7 +49,8 @@ import {
 } from 'recharts';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens, chartTokens } from '@/theme/tokens';
-import { getAuthHeaders } from '@/lib/authStorage';
+import { getAuthHeaders, getAuthToken } from '@/lib/authStorage';
+import { apiJson } from '@/lib/api';
 import { QuizResultsDialog } from './QuizResultsDialog';
 
 export interface QuizQuestionItem {
@@ -80,6 +81,31 @@ export interface LeaderboardEntry {
   avg_response_time_ms: number;
 }
 
+type QuizStage = 'LOBBY' | 'QUESTION_ACTIVE' | 'QUESTION_RESULTS' | 'FINAL_LEADERBOARD';
+
+export interface QuizResumeQuestion {
+  question_id: string;
+  question_index: number;
+  question_text: string;
+  options: { id: string; text: string }[];
+  start_time_ms: number;
+  end_time_ms: number;
+  revealed: boolean;
+  correct_option_id: string | null;
+}
+
+export interface QuizResumeState {
+  activityId?: string;
+  title?: string;
+  scoring_mode?: 'WIDE' | 'NARROW' | string;
+  status?: string;
+  question_count?: number;
+  stage: QuizStage;
+  current_question: QuizResumeQuestion | null;
+  answered_count?: number;
+  leaderboard?: LeaderboardEntry[];
+}
+
 interface LiveQuizModalProps {
   open: boolean;
   activityId: string;
@@ -87,11 +113,10 @@ interface LiveQuizModalProps {
   quiz: QuizInfo;
   onClose: () => void;
   onActivityEnded: () => void;
+  resumeState?: QuizResumeState | null;
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
-type QuizStage = 'LOBBY' | 'QUESTION_ACTIVE' | 'QUESTION_RESULTS' | 'FINAL_LEADERBOARD';
 
 export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
   open,
@@ -100,11 +125,20 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
   quiz,
   onClose,
   onActivityEnded,
+  resumeState,
 }) => {
-  const [stage, setStage] = useState<QuizStage>('LOBBY');
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
-  const [liveAnsweredCount, setLiveAnsweredCount] = useState<number>(0);
-  const [timeRemainingSeconds, setTimeRemainingSeconds] = useState<number>(20);
+  const resumeQuestion = resumeState?.current_question ?? null;
+  const resumeIndex = resumeQuestion?.question_index ?? 0;
+
+  const [stage, setStage] = useState<QuizStage>(resumeState?.stage ?? 'LOBBY');
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(resumeIndex);
+  const [liveAnsweredCount, setLiveAnsweredCount] = useState<number>(resumeState?.answered_count ?? 0);
+  const [timeRemainingSeconds, setTimeRemainingSeconds] = useState<number>(() => {
+    if (resumeState?.stage === 'QUESTION_ACTIVE' && resumeQuestion) {
+      return Math.max(0, Math.ceil((resumeQuestion.end_time_ms - Date.now()) / 1000));
+    }
+    return quiz.questions[resumeIndex]?.time_limit_seconds || 20;
+  });
   const [distribution, setDistribution] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [ending, setEnding] = useState(false);
@@ -115,7 +149,7 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
 
   const socketRef = useRef<Socket | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const currentQuestionIdRef = useRef<string | null>(null);
+  const currentQuestionIdRef = useRef<string | null>(resumeQuestion?.question_id ?? null);
 
   const currentQuestion = quiz.questions[currentQuestionIndex] || quiz.questions[0];
 
@@ -151,11 +185,21 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
   useEffect(() => {
     if (!open || !activityId) return;
 
-    const socket = io(API_BASE_URL);
+    const socket = io(API_BASE_URL, {
+      auth: { token: getAuthToken() },
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('join_activity_teacher', activityId);
+      socket.emit('join_activity_teacher', activityId, (result: { ok?: boolean; error?: string } | undefined) => {
+        if (!result?.ok) {
+          setError(result?.error || 'The server denied access to this live quiz room.');
+        }
+      });
+    });
+
+    socket.on('auth:error', (data: { error?: string } | undefined) => {
+      setError(data?.error || 'Socket authentication failed. Please sign in again.');
     });
 
     socket.on('quiz:live_answers', (data: any) => {
@@ -173,6 +217,110 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, [open, activityId]);
+
+  // Restore a live quiz exactly where the server says it is (resume flow).
+  useEffect(() => {
+    if (!open || !activityId || !resumeState) return;
+
+    let cancelled = false;
+
+    const startCountdown = (endTimeMs: number) => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((endTimeMs - Date.now()) / 1000));
+        setTimeRemainingSeconds(remaining);
+        if (remaining <= 0 && timerIntervalRef.current) {
+          clearInterval(timerIntervalRef.current);
+        }
+      }, 200);
+    };
+
+    const applyResumeState = async () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      setError(null);
+
+      const question = resumeState.current_question;
+      const index = question?.question_index ?? 0;
+      setLiveAnsweredCount(resumeState.answered_count ?? 0);
+      setCurrentQuestionIndex(index);
+      currentQuestionIdRef.current = question?.question_id ?? null;
+
+      if (resumeState.stage === 'LOBBY') {
+        currentQuestionIdRef.current = null;
+        setCurrentQuestionIndex(0);
+        setDistribution([]);
+        setStage('LOBBY');
+        return;
+      }
+
+      if (resumeState.stage === 'QUESTION_ACTIVE') {
+        if (!question) {
+          setStage('LOBBY');
+          return;
+        }
+        const fallbackLimit = quiz.questions[index]?.time_limit_seconds || 20;
+        const endTime = Number.isFinite(question.end_time_ms)
+          ? question.end_time_ms
+          : Date.now() + fallbackLimit * 1000;
+        setTimeRemainingSeconds(Math.max(0, Math.ceil((endTime - Date.now()) / 1000)));
+        setStage('QUESTION_ACTIVE');
+        startCountdown(endTime);
+        return;
+      }
+
+      if (resumeState.stage === 'QUESTION_RESULTS') {
+        setStage('QUESTION_RESULTS');
+        try {
+          const { res, data } = await apiJson<{
+            questions?: Array<{ id?: string; question_id?: string; question_index?: number; distribution?: any[] }>;
+            leaderboard?: LeaderboardEntry[];
+          }>(`/live-activities/${activityId}/quiz/results`);
+
+          if (!cancelled && res.ok && data) {
+            const questions = data.questions || [];
+            const match =
+              questions.find(
+                (item) =>
+                  (question?.question_id && (item.question_id === question.question_id || item.id === question.question_id)) ||
+                  item.question_index === index
+              ) || questions[index];
+            setDistribution(match?.distribution || []);
+            setLeaderboard(data.leaderboard || resumeState.leaderboard || []);
+          } else if (!cancelled) {
+            setLeaderboard(resumeState.leaderboard || []);
+          }
+        } catch {
+          if (!cancelled) setLeaderboard(resumeState.leaderboard || []);
+        }
+        return;
+      }
+
+      // FINAL_LEADERBOARD
+      setStage('FINAL_LEADERBOARD');
+      if (resumeState.leaderboard && resumeState.leaderboard.length > 0) {
+        setLeaderboard(resumeState.leaderboard);
+        return;
+      }
+      try {
+        const { res, data } = await apiJson<{
+          leaderboard?: LeaderboardEntry[];
+          finalLeaderboard?: LeaderboardEntry[];
+        }>(`/live-activities/${activityId}/quiz/leaderboard`);
+        if (!cancelled && res.ok && data) {
+          setLeaderboard(data.leaderboard || data.finalLeaderboard || []);
+        }
+      } catch {
+        // Keep whatever leaderboard the resume payload provided.
+      }
+    };
+
+    applyResumeState();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activityId, resumeState]);
 
   const startQuestion = async (index: number) => {
     setStartingNext(true);

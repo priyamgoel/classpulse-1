@@ -44,10 +44,11 @@ import HistoryIcon from '@mui/icons-material/History';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import StopCircleIcon from '@mui/icons-material/StopCircle';
 import { CreateQuizDialog } from './CreateQuizDialog';
-import { LiveQuizModal, QuizInfo } from './LiveQuizModal';
+import { LiveQuizModal, QuizInfo, QuizResumeState } from './LiveQuizModal';
 import { QuizResultsDialog } from './QuizResultsDialog';
 import { m3Tokens } from '@/theme/tokens';
 import { getAuthHeaders } from '@/lib/authStorage';
+import { apiJson } from '@/lib/api';
 
 interface QuizAuthoringViewProps {
   classroomId: string;
@@ -123,6 +124,7 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
   const [activeActivityModalOpen, setActiveActivityModalOpen] = useState(false);
   const [activeActivityId, setActiveActivityId] = useState<string | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<QuizInfo | null>(null);
+  const [resumeState, setResumeState] = useState<QuizResumeState | null>(null);
 
   // Stranded ACTIVE quiz recovery
   const [activeQuizActivity, setActiveQuizActivity] = useState<ActiveQuizActivity | null>(null);
@@ -183,6 +185,7 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
 
       const data = await res.json();
       if (res.ok && data.activity) {
+        setResumeState(null);
         setActiveActivityId(data.activity.id);
         setActiveQuiz({
           id: quiz.id,
@@ -281,7 +284,7 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
       )
     : undefined;
 
-  const handleResumeActiveQuiz = () => {
+  const handleResumeActiveQuiz = async () => {
     if (!activeQuizActivity) return;
     const found = activeQuizDefinition;
     if (!found) {
@@ -290,15 +293,34 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
       );
       return;
     }
-    setActiveActivityId(activeQuizActivity.id);
-    setActiveQuiz({
-      id: found.id,
-      title: found.title,
-      scoring_mode: found.scoring_mode,
-      question_count: found.questions?.length || found.question_count || 0,
-      questions: found.questions || [],
-    });
-    setActiveActivityModalOpen(true);
+
+    setCheckingActive(true);
+    setError(null);
+    try {
+      // Ask the server where the quiz actually is before showing the projector.
+      const { res, data } = await apiJson<QuizResumeState & { error?: string }>(
+        `/live-activities/${activeQuizActivity.id}/quiz/state`
+      );
+      if (!res.ok || !data || !data.stage) {
+        setError(data?.error || 'Failed to load the live quiz state');
+        return;
+      }
+
+      setActiveActivityId(activeQuizActivity.id);
+      setActiveQuiz({
+        id: found.id,
+        title: found.title,
+        scoring_mode: found.scoring_mode,
+        question_count: found.questions?.length || found.question_count || 0,
+        questions: found.questions || [],
+      });
+      setResumeState(data);
+      setActiveActivityModalOpen(true);
+    } catch {
+      setError('Network error loading the live quiz state');
+    } finally {
+      setCheckingActive(false);
+    }
   };
 
   const handleEndActiveQuiz = async () => {
@@ -826,11 +848,13 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
           activityId={activeActivityId}
           classroomId={classroomId}
           quiz={activeQuiz}
+          resumeState={resumeState}
           onClose={() => setActiveActivityModalOpen(false)}
           onActivityEnded={() => {
             setActiveActivityModalOpen(false);
             setActiveActivityId(null);
             setActiveQuiz(null);
+            setResumeState(null);
             setActiveQuizActivity(null);
             fetchQuizzes();
             fetchPastRuns();

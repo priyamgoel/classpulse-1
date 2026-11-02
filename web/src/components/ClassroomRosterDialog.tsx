@@ -29,6 +29,7 @@ import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface RosterStudent {
   student_id: string;
@@ -81,9 +82,8 @@ export const ClassroomRosterDialog: React.FC<ClassroomRosterDialogProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const response = await fetch(`${API_BASE_URL}/classrooms/${classroom.id}/roster`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await response.json();
       if (response.ok) {
@@ -104,12 +104,11 @@ export const ClassroomRosterDialog: React.FC<ClassroomRosterDialogProps> = ({
     setError(null);
     setSuccessMsg(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const response = await fetch(
         `${API_BASE_URL}/classrooms/${classroom.id}/roster/${studentToRemove.student_id}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: getAuthHeaders(),
         }
       );
       const data = await response.json();

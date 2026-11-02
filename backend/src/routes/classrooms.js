@@ -1,15 +1,19 @@
 const express = require('express');
+const crypto = require('crypto');
 const db = require('../db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { isEnrolled } = require('../utils/access');
 
 const router = express.Router();
 
 // Helper to generate a clean 6-character human-readable join code
 function generateJoinCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  // 32 characters divides 256 evenly, so modulo introduces no bias.
+  const bytes = crypto.randomBytes(6);
   let code = '';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(bytes[i] % chars.length);
   }
   return code;
 }
@@ -42,6 +46,10 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
         joinCode = generateJoinCode();
         attempts++;
       }
+    }
+
+    if (!isUnique) {
+      return res.status(500).json({ error: 'Could not generate a unique join code. Please try again.' });
     }
 
     const newClassroomResult = await db.query(
@@ -85,9 +93,26 @@ router.post('/:id/regenerate-join', authenticateToken, requireRole('teacher'), a
     }
 
     const newJoinCode = generateJoinCode();
+    let joinCodeUnique = false;
+    let regenerateAttempts = 0;
+    let candidateCode = newJoinCode;
+    while (!joinCodeUnique && regenerateAttempts < 10) {
+      const codeCheck = await db.query('SELECT id FROM classrooms WHERE join_code = $1', [candidateCode]);
+      if (codeCheck.rows.length === 0) {
+        joinCodeUnique = true;
+      } else {
+        candidateCode = generateJoinCode();
+        regenerateAttempts++;
+      }
+    }
+
+    if (!joinCodeUnique) {
+      return res.status(500).json({ error: 'Could not generate a unique join code. Please try again.' });
+    }
+
     const updateResult = await db.query(
       'UPDATE classrooms SET join_code = $1 WHERE id = $2 RETURNING *',
-      [newJoinCode, classroomId]
+      [candidateCode, classroomId]
     );
 
     res.json({
@@ -148,6 +173,9 @@ router.post('/join', authenticateToken, requireRole('student'), async (req, res)
       classroom,
     });
   } catch (err) {
+    if (err && err.code === '23505') {
+      return res.status(409).json({ error: 'You are already enrolled in this classroom section.' });
+    }
     console.error('Error joining classroom:', err);
     res.status(500).json({ error: 'Failed to join classroom' });
   }
@@ -197,12 +225,12 @@ router.get('/mine', authenticateToken, async (req, res) => {
                 COALESCE(
                   ROUND(
                     (
-                      CASE WHEN (SELECT COUNT(*) FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL) > 0
-                           THEN (SELECT COUNT(*)::numeric FROM attendance_records ar JOIN sessions s ON ar.session_id = s.id WHERE s.classroom_id = c.id AND ar.student_id = $1) / (SELECT COUNT(*)::numeric FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL) * 100
-                           ELSE 100
+                      CASE WHEN (SELECT COUNT(*) FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL AND s.started_at >= en.joined_at) > 0
+                           THEN (SELECT COUNT(*)::numeric FROM attendance_records ar JOIN sessions s ON ar.session_id = s.id WHERE s.classroom_id = c.id AND ar.student_id = $1 AND s.started_at >= en.joined_at) / (SELECT COUNT(*)::numeric FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL AND s.started_at >= en.joined_at) * 100
+                           ELSE 0
                       END
                     ), 1
-                  ), 100
+                  ), 0
                 )::float as attendance_avg_rate,
                 en.joined_at
          FROM enrollments en
@@ -242,6 +270,18 @@ router.get('/:id/summary', authenticateToken, async (req, res) => {
     }
 
     const classroom = classResult.rows[0];
+
+    const isOwner = req.user.role === 'teacher' && classroom.teacher_id === req.user.id;
+    const isMember = req.user.role === 'student' && await isEnrolled(req.user.id, classroomId);
+
+    if (!isOwner && !isMember) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this classroom' });
+    }
+
+    // The join code is a secret used to enrol; never expose it to students.
+    if (isMember) {
+      delete classroom.join_code;
+    }
 
     // Attendance stats
     const attendanceStats = await db.query(
@@ -383,8 +423,10 @@ router.delete('/:id/roster/:student_id', authenticateToken, requireRole('teacher
 
 // DELETE /classrooms/:id — Teacher permanently deletes a classroom and all related data
 router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res) => {
-  const client = await db.pool.connect();
+  let client;
+  let inTransaction = false;
   try {
+    client = await db.pool.connect();
     const classroomId = req.params.id;
 
     // Check ownership
@@ -397,6 +439,7 @@ router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res
     }
 
     await client.query('BEGIN');
+    inTransaction = true;
 
     // Cascade delete: attendance_records → sessions → enrollments → classroom
     await client.query(
@@ -409,14 +452,21 @@ router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res
     await client.query('DELETE FROM classrooms WHERE id = $1', [classroomId]);
 
     await client.query('COMMIT');
+    inTransaction = false;
 
     res.json({ message: 'Classroom deleted successfully' });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client && inTransaction) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        console.error('Error rolling back classroom deletion:', rollbackErr.message);
+      }
+    }
     console.error('Error deleting classroom:', err);
     res.status(500).json({ error: 'Failed to delete classroom' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
