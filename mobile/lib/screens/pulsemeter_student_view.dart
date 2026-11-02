@@ -8,6 +8,26 @@ import '../theme/tokens.dart';
 import 'live_pulsemeter_screen.dart';
 import 'live_quiz_student_screen.dart';
 
+Map<String, dynamic> _safeMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map((key, val) => MapEntry(key.toString(), val));
+  }
+  return <String, dynamic>{};
+}
+
+Map<String, dynamic>? _safeMapOrNull(dynamic value) {
+  if (value is Map) return _safeMap(value);
+  return null;
+}
+
+List<Map<String, dynamic>> _safeMapList(dynamic value) {
+  if (value is List) {
+    return value.whereType<Map>().map(_safeMap).toList();
+  }
+  return <Map<String, dynamic>>[];
+}
+
 class PulseMeterStudentView extends StatefulWidget {
   final String? initialClassroomId;
 
@@ -78,42 +98,55 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-      );
+      ).timeout(const Duration(seconds: 10));
+
+      if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        Map<String, dynamic> data;
+        try {
+          data = _safeMap(jsonDecode(response.body));
+        } catch (_) {
+          data = <String, dynamic>{};
+        }
+
         if (data['active'] == true && data['activity'] != null) {
-          if (mounted) {
-            setState(() {
-              _activeActivity = data['activity'];
-              _isChecking = false;
-            });
-          }
+          final activity = _safeMap(data['activity']);
+          setState(() {
+            _activeActivity = activity;
+            _message = null;
+          });
         } else {
-          if (mounted) {
-            setState(() {
-              _activeActivity = null;
-              _message = 'No PulseMeter activity is currently active for this section.';
-              _isChecking = false;
-            });
-          }
+          setState(() {
+            _activeActivity = null;
+            _message = 'No live activity is currently active for this section.';
+          });
         }
       } else {
-        if (!silent && mounted) {
+        if (!silent) {
           setState(() {
             _activeActivity = null;
             _message = 'Unable to check live activities.';
-            _isChecking = false;
           });
         }
       }
-    } catch (e) {
+    } on TimeoutException {
+      if (!silent && mounted) {
+        setState(() {
+          _activeActivity = null;
+          _message = 'The server did not respond. Please try again.';
+        });
+      }
+    } catch (_) {
       if (!silent && mounted) {
         setState(() {
           _activeActivity = null;
           _message = 'Network error checking live activity.';
-          _isChecking = false;
         });
+      }
+    } finally {
+      if (!silent && mounted) {
+        setState(() => _isChecking = false);
       }
     }
   }
@@ -123,20 +156,22 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
 
     final activity = _activeActivity!;
     final isQuiz = activity['activity_type'] == 'QUIZ';
-    final userResponse = activity['user_response'] as Map<String, dynamic>?;
+    final userResponse = _safeMapOrNull(activity['user_response']);
+    final activityId = (activity['id'] ?? '').toString();
+    final initialScore = userResponse?['cumulative_score'];
 
-    if (isQuiz && activity['quiz'] != null) {
-      final quiz = activity['quiz'];
+    if (isQuiz) {
+      final quiz = _safeMap(activity['quiz']);
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => LiveQuizStudentScreen(
-            activityId: activity['id'],
+            activityId: activityId,
             classroomId: _selectedClassroomId!,
-            title: quiz['title'] ?? 'Live Quiz',
-            scoringMode: quiz['scoring_mode'] ?? 'WIDE',
-            questions: (quiz['questions'] as List?) ?? [],
-            initialCumulativeScore: (userResponse?['cumulative_score'] as int?) ?? 0,
-            initialAnsweredQuestions: (userResponse?['answered_questions'] as List?) ?? [],
+            title: (quiz['title'] ?? 'Live Quiz').toString(),
+            scoringMode: (quiz['scoring_mode'] ?? 'WIDE').toString(),
+            questions: _safeMapList(quiz['questions']),
+            initialCumulativeScore: initialScore is num ? initialScore.toInt() : 0,
+            initialAnsweredQuestions: _safeMapList(userResponse?['answered_questions']),
           ),
         ),
       ).then((_) {
@@ -147,16 +182,16 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
       return;
     }
 
-    final pulsemeter = activity['pulsemeter'];
-    if (pulsemeter != null) {
+    final pulsemeter = _safeMap(activity['pulsemeter']);
+    if (pulsemeter.isNotEmpty) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => LivePulseMeterScreen(
-            activityId: activity['id'],
+            activityId: activityId,
             classroomId: _selectedClassroomId!,
-            title: pulsemeter['title'] ?? 'Live PulseMeter',
-            type: pulsemeter['type'] ?? 'WORD_CLOUD',
-            config: (pulsemeter['config'] as Map<String, dynamic>?) ?? {},
+            title: (pulsemeter['title'] ?? 'Live PulseMeter').toString(),
+            type: (pulsemeter['type'] ?? 'WORD_CLOUD').toString(),
+            config: _safeMap(pulsemeter['config']),
             initialHasSubmitted: userResponse?['has_responded'] == true,
             initialResponseValue: userResponse?['response_value'],
           ),
@@ -199,6 +234,17 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
         ),
       );
     }
+
+    final activeActivity = _activeActivity;
+    final isQuiz = activeActivity?['activity_type'] == 'QUIZ';
+    final quiz = _safeMap(activeActivity?['quiz']);
+    final pulsemeter = _safeMap(activeActivity?['pulsemeter']);
+    final activityBadge = isQuiz
+        ? 'QUIZ'
+        : (pulsemeter['type'] ?? 'POLL').toString().replaceAll('_', ' ');
+    final activityTitle = isQuiz
+        ? (quiz['title'] ?? 'Live Quiz').toString()
+        : (pulsemeter['title'] ?? 'Live Question').toString();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
@@ -246,7 +292,7 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
               child: Center(child: CircularProgressIndicator()),
             )
           else if (_activeActivity != null) ...[
-            // Active PulseMeter Card
+            // Active Activity Card (Quiz or PulseMeter)
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -304,7 +350,7 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          (_activeActivity!['pulsemeter']?['type'] ?? 'POLL').toString().replaceAll('_', ' '),
+                          activityBadge,
                           style: const TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
@@ -316,7 +362,7 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    _activeActivity!['pulsemeter']?['title'] ?? 'Live Question',
+                    activityTitle,
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -324,9 +370,11 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Your instructor has launched a live PulseMeter activity for this classroom.',
-                    style: TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
+                  Text(
+                    isQuiz
+                        ? 'Your instructor has launched a live quiz for this classroom.'
+                        : 'Your instructor has launched a live PulseMeter activity for this classroom.',
+                    style: const TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
                   ),
                   const SizedBox(height: 20),
                   SizedBox(
@@ -334,10 +382,10 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
                     height: 48,
                     child: FilledButton.icon(
                       onPressed: _joinLiveActivity,
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text(
-                        'Join Live PulseMeter',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      icon: Icon(isQuiz ? Icons.quiz_outlined : Icons.play_arrow),
+                      label: Text(
+                        isQuiz ? 'Join Live Quiz' : 'Join Live PulseMeter',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       style: FilledButton.styleFrom(
                         backgroundColor: M3Tokens.primary,
@@ -364,12 +412,12 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
                   const Icon(Icons.speed, size: 48, color: M3Tokens.outline),
                   const SizedBox(height: 12),
                   const Text(
-                    'No Active PulseMeter',
+                    'No Active Activity',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _message ?? 'When your instructor launches a Word Cloud, Poll, or Rating Scale, it will appear here in real time.',
+                    _message ?? 'When your instructor launches a quiz, Word Cloud, Poll, or Rating Scale, it will appear here in real time.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: M3Tokens.onSurfaceVariant, fontSize: 13),
                   ),
