@@ -21,6 +21,13 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Tabs,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -32,9 +39,15 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import TimerIcon from '@mui/icons-material/Timer';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import HistoryIcon from '@mui/icons-material/History';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import StopCircleIcon from '@mui/icons-material/StopCircle';
 import { CreateQuizDialog } from './CreateQuizDialog';
 import { LiveQuizModal, QuizInfo } from './LiveQuizModal';
+import { QuizResultsDialog } from './QuizResultsDialog';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface QuizAuthoringViewProps {
   classroomId: string;
@@ -62,6 +75,32 @@ export interface Quiz {
   created_at: string;
 }
 
+export interface QuizPastRun {
+  id: string;
+  activity_type: 'PULSEMETER' | 'QUIZ';
+  status: 'ACTIVE' | 'ENDED';
+  started_at: string;
+  ended_at?: string | null;
+  title: string;
+  type?: string | null;
+  scoring_mode?: 'WIDE' | 'NARROW' | string | null;
+  question_count?: number;
+  response_count?: number;
+  participant_count?: number;
+  present_count?: number;
+  blocked_count?: number;
+  avg_score?: number | null;
+}
+
+interface ActiveQuizActivity {
+  id: string;
+  activity_type?: 'PULSEMETER' | 'QUIZ';
+  activity_ref_id?: string;
+  quiz_id?: string;
+  title?: string;
+  started_at?: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomId }) => {
@@ -70,11 +109,25 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Library / Past Runs tabs
+  const [viewTab, setViewTab] = useState(0);
+  const [pastRuns, setPastRuns] = useState<QuizPastRun[]>([]);
+  const [loadingPastRuns, setLoadingPastRuns] = useState(false);
+
+  // Historical results dialog
+  const [resultsActivity, setResultsActivity] = useState<QuizPastRun | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
+
   // Live Quiz Modal State
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [activeActivityModalOpen, setActiveActivityModalOpen] = useState(false);
   const [activeActivityId, setActiveActivityId] = useState<string | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<QuizInfo | null>(null);
+
+  // Stranded ACTIVE quiz recovery
+  const [activeQuizActivity, setActiveQuizActivity] = useState<ActiveQuizActivity | null>(null);
+  const [checkingActive, setCheckingActive] = useState(false);
+  const [endingActive, setEndingActive] = useState(false);
 
   // Delete Quiz State
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -83,23 +136,31 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
   useEffect(() => {
     if (classroomId) {
       fetchQuizzes();
+      fetchPastRuns();
+      checkActiveQuiz();
     }
   }, [classroomId]);
 
   const handleDeleteQuiz = async (id: string) => {
     setDeleting(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/quizzes/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setDeleteConfirmId(null);
         fetchQuizzes();
+      } else if (res.status === 409) {
+        // The quiz has live-run history and must be kept for analytics.
+        setDeleteConfirmId(null);
+        setError(
+          (data as any)?.error ||
+            'This quiz has live-run history and cannot be deleted. Its past results must be preserved.'
+        );
       } else {
-        const data = await res.json();
-        setError(data.error || 'Failed to delete Quiz');
+        setError((data as any)?.error || 'Failed to delete Quiz');
       }
     } catch {
       setError('Network error deleting Quiz');
@@ -112,12 +173,11 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
     setLaunchingId(quiz.id);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/quizzes/${quiz.id}/launch`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
       });
 
@@ -146,9 +206,8 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/quizzes?classroom_id=${classroomId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -160,6 +219,108 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
       setError('Network error fetching quizzes');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPastRuns = async () => {
+    if (!classroomId) return;
+    setLoadingPastRuns(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/live-activities?classroom_id=${classroomId}&activity_type=QUIZ&status=ENDED&limit=50`,
+        { headers: getAuthHeaders() }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPastRuns((data as any)?.activities || []);
+      } else {
+        setError((data as any)?.error || 'Failed to fetch past quiz runs');
+      }
+    } catch {
+      setError('Network error fetching past quiz runs');
+    } finally {
+      setLoadingPastRuns(false);
+    }
+  };
+
+  const checkActiveQuiz = async () => {
+    if (!classroomId) return;
+    setCheckingActive(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/live-activities/active?classroom_id=${classroomId}`,
+        { headers: getAuthHeaders() }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const activity = (data as any)?.active ? (data as any)?.activity : null;
+        if (activity && (!activity.activity_type || activity.activity_type === 'QUIZ')) {
+          setActiveQuizActivity(activity);
+        } else {
+          setActiveQuizActivity(null);
+        }
+      } else {
+        setError((data as any)?.error || 'Failed to check for an active quiz session');
+      }
+    } catch {
+      setError('Network error checking for an active quiz session');
+    } finally {
+      setCheckingActive(false);
+    }
+  };
+
+  const handleOpenResults = (run: QuizPastRun) => {
+    setResultsActivity(run);
+    setResultsOpen(true);
+  };
+
+  const activeQuizDefinition = activeQuizActivity
+    ? quizzes.find(
+        (quiz) => quiz.id === (activeQuizActivity.activity_ref_id || activeQuizActivity.quiz_id)
+      )
+    : undefined;
+
+  const handleResumeActiveQuiz = () => {
+    if (!activeQuizActivity) return;
+    const found = activeQuizDefinition;
+    if (!found) {
+      setError(
+        'Could not find the quiz definition for the live session. End the live activity to unblock new launches.'
+      );
+      return;
+    }
+    setActiveActivityId(activeQuizActivity.id);
+    setActiveQuiz({
+      id: found.id,
+      title: found.title,
+      scoring_mode: found.scoring_mode,
+      question_count: found.questions?.length || found.question_count || 0,
+      questions: found.questions || [],
+    });
+    setActiveActivityModalOpen(true);
+  };
+
+  const handleEndActiveQuiz = async () => {
+    if (!activeQuizActivity) return;
+    setEndingActive(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/live-activities/${activeQuizActivity.id}/end`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setActiveQuizActivity(null);
+        await Promise.all([fetchQuizzes(), fetchPastRuns()]);
+      } else {
+        setError((data as any)?.error || 'Failed to end the active quiz session');
+      }
+    } catch {
+      setError('Network error ending the active quiz session');
+    } finally {
+      setEndingActive(false);
     }
   };
 
@@ -226,19 +387,72 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
           >
             Create Quiz
           </Button>
-          <IconButton size="small" onClick={fetchQuizzes} title="Refresh Quizzes">
+          <IconButton
+            size="small"
+            onClick={() => {
+              fetchQuizzes();
+              fetchPastRuns();
+              checkActiveQuiz();
+            }}
+            title="Refresh Quizzes"
+          >
             <RefreshIcon fontSize="small" />
           </IconButton>
         </Stack>
       </Stack>
 
+      {activeQuizActivity && !activeActivityModalOpen && (
+        <Alert
+          severity="warning"
+          icon={<WarningAmberIcon />}
+          sx={{ mb: 3, borderRadius: '8px', alignItems: 'center' }}
+          action={
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Button
+                color="inherit"
+                size="small"
+                variant="outlined"
+                startIcon={<PlayArrowIcon />}
+                onClick={handleResumeActiveQuiz}
+                disabled={checkingActive}
+                sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+              >
+                Resume
+              </Button>
+              <Button
+                color="error"
+                size="small"
+                variant="contained"
+                startIcon={endingActive ? <CircularProgress size={14} color="inherit" /> : <StopCircleIcon />}
+                onClick={handleEndActiveQuiz}
+                disabled={endingActive}
+                sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+              >
+                {endingActive ? 'Ending...' : 'End it'}
+              </Button>
+            </Stack>
+          }
+        >
+          <strong>A quiz session is still live</strong> — &quot;
+          {activeQuizActivity.title || activeQuizDefinition?.title || 'Untitled quiz'}&quot; is blocking new
+          launches. Resume it or end it.
+        </Alert>
+      )}
+
       {error && (
-        <Alert severity="error" sx={{ mb: 3, borderRadius: '8px' }}>
+        <Alert severity="error" sx={{ mb: 3, borderRadius: '8px' }} onClose={() => setError(null)}>
           {error}
         </Alert>
       )}
 
-      {loading ? (
+      <Box sx={{ borderBottom: `1px solid ${m3Tokens.color.outlineVariant}`, mb: 3 }}>
+        <Tabs value={viewTab} onChange={(_, val) => setViewTab(val)}>
+          <Tab label={`Library (${quizzes.length})`} sx={{ textTransform: 'none', fontWeight: 700 }} />
+          <Tab label={`Past Runs (${pastRuns.length})`} sx={{ textTransform: 'none', fontWeight: 700 }} />
+        </Tabs>
+      </Box>
+
+      {viewTab === 0 && (loading ? (
         <Box sx={{ py: 6, textAlign: 'center' }}>
           <CircularProgress size={32} />
           <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 1 }}>
@@ -354,7 +568,7 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
                                   {q.question_text}
                                 </Typography>
                                 <Stack spacing={0.5}>
-                                  {q.options?.map((opt) => {
+                                  {q.options?.map((opt, optIdx) => {
                                     const isCorrect = q.correct_option_id === opt.id;
                                     return (
                                       <Stack direction="row" spacing={0.75} key={opt.id} alignItems="center">
@@ -372,7 +586,7 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
                                             color: isCorrect ? 'success.dark' : m3Tokens.color.onSurfaceVariant,
                                           }}
                                         >
-                                          {opt.id.toUpperCase()}. {opt.text}
+                                          {String.fromCharCode(65 + optIdx)}. {opt.text}
                                         </Typography>
                                       </Stack>
                                     );
@@ -419,6 +633,153 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
             );
           })}
         </Grid>
+      ))}
+
+      {viewTab === 1 && (
+        <Box>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
+                Past Quiz Runs
+              </Typography>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                Ended live sessions keep full per-question and per-student analytics.
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={fetchPastRuns} title="Refresh past runs">
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+
+          {loadingPastRuns ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <CircularProgress size={32} />
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 1 }}>
+                Loading past runs...
+              </Typography>
+            </Box>
+          ) : pastRuns.length === 0 ? (
+            <Paper
+              elevation={0}
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: '12px',
+                border: `1px dashed ${m3Tokens.color.outlineVariant}`,
+                bgcolor: '#FFFFFF',
+              }}
+            >
+              <HistoryIcon sx={{ fontSize: 48, color: m3Tokens.color.primary, opacity: 0.6, mb: 1 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, mb: 0.5 }}>
+                No quiz runs yet
+              </Typography>
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, maxWidth: 450, mx: 'auto', mb: 2.5 }}>
+                No quiz runs yet — launch one from the Library.
+              </Typography>
+              <Button
+                variant="outlined"
+                startIcon={<PlayArrowIcon />}
+                onClick={() => setViewTab(0)}
+                sx={{ fontWeight: 700, textTransform: 'none' }}
+              >
+                Go to Library
+              </Button>
+            </Paper>
+          ) : (
+            <Paper
+              elevation={0}
+              sx={{
+                borderRadius: '12px',
+                border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                overflow: 'hidden',
+                bgcolor: '#FFFFFF',
+              }}
+            >
+              <Table>
+                <TableHead sx={{ bgcolor: '#F8F9FA' }}>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      DATE / TIME
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      TITLE
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      SCORING MODE
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      PARTICIPANTS
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      AVG SCORE
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      RESULTS
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pastRuns.map((run) => (
+                    <TableRow key={run.id} hover>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                          {run.started_at
+                            ? new Date(run.started_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+                            : '--'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                          {run.started_at
+                            ? new Date(run.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : ''}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                          {run.title || 'Untitled Quiz'}
+                        </Typography>
+                        {!!run.question_count && (
+                          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                            {run.question_count} questions
+                          </Typography>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {run.scoring_mode === 'WIDE' || run.scoring_mode === 'NARROW' ? (
+                          renderScoringModeChip(run.scoring_mode)
+                        ) : (
+                          <Chip label={run.scoring_mode || '--'} size="small" />
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurface }}>
+                          {run.participant_count ?? 0}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.primary }}>
+                          {run.avg_score === null || run.avg_score === undefined
+                            ? '--'
+                            : Number(run.avg_score).toFixed(1)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VisibilityIcon fontSize="small" />}
+                          onClick={() => handleOpenResults(run)}
+                          sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                        >
+                          View Results
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Paper>
+          )}
+        </Box>
       )}
 
       {/* Delete Confirmation Dialog */}
@@ -470,10 +831,20 @@ export const QuizAuthoringView: React.FC<QuizAuthoringViewProps> = ({ classroomI
             setActiveActivityModalOpen(false);
             setActiveActivityId(null);
             setActiveQuiz(null);
+            setActiveQuizActivity(null);
             fetchQuizzes();
+            fetchPastRuns();
           }}
         />
       )}
+
+      {/* Historical Results Dialog (Past Runs) */}
+      <QuizResultsDialog
+        open={resultsOpen}
+        onClose={() => setResultsOpen(false)}
+        activityId={resultsActivity?.id || null}
+        title={resultsActivity?.title}
+      />
     </Box>
   );
 };

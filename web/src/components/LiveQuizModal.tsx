@@ -49,6 +49,8 @@ import {
 } from 'recharts';
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens, chartTokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
+import { QuizResultsDialog } from './QuizResultsDialog';
 
 export interface QuizQuestionItem {
   id: string;
@@ -108,9 +110,12 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
   const [ending, setEnding] = useState(false);
   const [startingNext, setStartingNext] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [detailedResultsOpen, setDetailedResultsOpen] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentQuestionIdRef = useRef<string | null>(null);
 
   const currentQuestion = quiz.questions[currentQuestionIndex] || quiz.questions[0];
 
@@ -119,18 +124,29 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
   }, [distribution]);
 
   const quizDistributionData = useMemo(() => {
+    const question = quiz.questions[currentQuestionIndex] || quiz.questions[0];
+    const questionOptions = question?.options || [];
     return distribution.map((item, index) => {
       const shortCode =
         item.option_id && item.option_id.toString().length <= 2
           ? item.option_id.toString().toUpperCase()
           : String.fromCharCode(65 + index);
+      const fallbackOption = questionOptions.find((opt) => opt.id === item.option_id);
       return {
         ...item,
         shortCode,
         displayLabel: `Option ${shortCode}`,
+        // Older payloads may omit option_text; derive it from the authored question.
+        option_text: item.option_text || fallbackOption?.text || '',
+        // The teacher view must not depend on a correct-answer field in live answers.
+        is_correct:
+          item.is_correct ??
+          (item.option_id && question?.correct_option_id
+            ? item.option_id === question.correct_option_id
+            : false),
       };
     });
-  }, [distribution]);
+  }, [distribution, quiz.questions, currentQuestionIndex]);
 
   useEffect(() => {
     if (!open || !activityId) return;
@@ -143,9 +159,10 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
     });
 
     socket.on('quiz:live_answers', (data: any) => {
-      if (data.activityId === activityId) {
-        setLiveAnsweredCount(data.answeredCount || 0);
-      }
+      if (data.activityId !== activityId) return;
+      // Ignore late/stale counts from a question the teacher already advanced past.
+      if (data.questionId && data.questionId !== currentQuestionIdRef.current) return;
+      setLiveAnsweredCount(data.answeredCount || 0);
     });
 
     return () => {
@@ -162,27 +179,27 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
     setError(null);
     setLiveAnsweredCount(0);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const q = quiz.questions[index];
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/quiz/start-question`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ question_id: q.id, question_index: index }),
       });
 
       const data = await res.json();
       if (res.ok) {
+        currentQuestionIdRef.current = q.id;
         setCurrentQuestionIndex(index);
         setStage('QUESTION_ACTIVE');
         const limit = data.timeLimitSeconds || q.time_limit_seconds || 20;
         setTimeRemainingSeconds(limit);
 
-        // Run countdown timer
+        // Run countdown timer against the server's authoritative window when provided.
         if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-        const endTime = Date.now() + (limit * 1000);
+        const endTime = data.endTimeMs ?? Date.now() + (limit * 1000);
 
         timerIntervalRef.current = setInterval(() => {
           const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
@@ -205,13 +222,12 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const q = quiz.questions[currentQuestionIndex];
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/quiz/show-results`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ question_id: q.id }),
       });
@@ -241,10 +257,9 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
     setEnding(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/quiz/end`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -260,21 +275,43 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
     }
   };
 
-  const handleEmergencyEnd = async () => {
+  const handleEmergencyEnd = async (): Promise<boolean> => {
     setEnding(true);
+    setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
-      await fetch(`${API_BASE_URL}/live-activities/${activityId}/end`, {
+      const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/end`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data as any)?.error || 'Failed to end the quiz');
+        return false;
+      }
       onActivityEnded();
-      onClose();
+      return true;
     } catch {
       setError('Network error ending activity');
+      return false;
     } finally {
       setEnding(false);
     }
+  };
+
+  const handleCloseWindow = () => {
+    if (stage === 'FINAL_LEADERBOARD') {
+      // The quiz already ended server-side; just close and refresh the parent's lists.
+      onActivityEnded();
+      onClose();
+      return;
+    }
+    // Closing before the podium would strand an ACTIVE activity and block future launches.
+    setCloseConfirmOpen(true);
+  };
+
+  const handleConfirmEndAndClose = async () => {
+    const ended = await handleEmergencyEnd();
+    if (ended) setCloseConfirmOpen(false);
   };
 
   const totalTimeLimit = currentQuestion?.time_limit_seconds || 20;
@@ -441,7 +478,7 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
                           fontWeight: 800,
                         }}
                       >
-                        {opt.id.toUpperCase()}
+                        {String.fromCharCode(65 + idx)}
                       </Avatar>
                       <Typography variant="body1" sx={{ fontWeight: 600, color: m3Tokens.color.onSurface }}>
                         {opt.text}
@@ -485,7 +522,12 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
                   Question {currentQuestionIndex + 1} Answer Distribution
                 </Typography>
                 <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mb: 2 }}>
-                  Correct Answer: <strong>Option {currentQuestion.correct_option_id.toUpperCase()}</strong>
+                  Correct Answer:{' '}
+                  <strong>
+                    {currentQuestion?.correct_option_id
+                      ? `Option ${currentQuestion.correct_option_id.toUpperCase()}`
+                      : 'Revealed from result data'}
+                  </strong>
                 </Typography>
 
                 <Box sx={{ width: '100%', height: 260 }}>
@@ -737,6 +779,14 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
               <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
                 Cumulative results calculated with {quiz.scoring_mode} scoring formula.
               </Typography>
+              <Button
+                variant="contained"
+                startIcon={<LeaderboardIcon />}
+                onClick={() => setDetailedResultsOpen(true)}
+                sx={{ mt: 2, textTransform: 'none', fontWeight: 800, borderRadius: '8px', px: 3 }}
+              >
+                View Detailed Results
+              </Button>
             </Box>
 
             <Grid container spacing={2} justifyContent="center">
@@ -832,15 +882,52 @@ export const LiveQuizModal: React.FC<LiveQuizModalProps> = ({
 
       <DialogActions sx={{ p: 2, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
         <Button
-          onClick={() => {
-            onActivityEnded();
-            onClose();
-          }}
+          onClick={handleCloseWindow}
+          disabled={ending}
           sx={{ textTransform: 'none', fontWeight: 700 }}
         >
           Close Window
         </Button>
       </DialogActions>
+
+      {/* Confirm ending an in-progress quiz before closing */}
+      <Dialog open={closeConfirmOpen} onClose={() => !ending && setCloseConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>End this quiz?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+            This quiz is still live. Closing the window without ending it leaves the session locked and blocks new
+            quiz launches. End the quiz now and preserve its results?
+          </Typography>
+          {error && (
+            <Alert severity="error" sx={{ mt: 2, borderRadius: '8px' }}>
+              {error}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setCloseConfirmOpen(false)} disabled={ending} sx={{ textTransform: 'none' }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleConfirmEndAndClose}
+            disabled={ending}
+            startIcon={ending ? <CircularProgress size={14} color="inherit" /> : <StopCircleIcon />}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            {ending ? 'Ending...' : 'End Quiz & Close'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Durable detailed results for this run */}
+      <QuizResultsDialog
+        open={detailedResultsOpen}
+        onClose={() => setDetailedResultsOpen(false)}
+        activityId={activityId}
+        title={quiz.title}
+      />
     </Dialog>
   );
 };

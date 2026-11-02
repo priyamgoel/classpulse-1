@@ -58,6 +58,7 @@ import {
 import { io, Socket } from 'socket.io-client';
 import { m3Tokens, chartTokens } from '@/theme/tokens';
 import { WordCloudMuteDialog } from './WordCloudMuteDialog';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 export interface LiveActivity {
   id: string;
@@ -144,9 +145,8 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
 
   const fetchSubmissions = async () => {
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/word-cloud-submissions`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -160,10 +160,9 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
   const handleApproveSubmission = async (responseId: string) => {
     setSubmissionActionLoading(responseId);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/responses/${responseId}/approve`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -183,10 +182,9 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
   const handleDeleteSubmission = async (responseId: string) => {
     setSubmissionActionLoading(responseId);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/responses/${responseId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -255,13 +253,12 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
     };
   }, [open, activityId]);
 
-  const fetchAnalytics = async () => {
-    setLoading(true);
+  const fetchAnalytics = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/analytics`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -279,7 +276,7 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
     } catch {
       setError('Network error loading activity analytics');
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
@@ -287,15 +284,16 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
     setEnding(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/live-activities/${activityId}/end`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
+        // Keep the projector open so the teacher can discuss the final charts.
+        // The parent's Past Runs list is refreshed only when the modal is closed.
         setIsConcluded(true);
-        onActivityEnded();
+        await fetchAnalytics(false);
       } else {
         setError(data.error || 'Failed to end live activity');
       }
@@ -373,10 +371,10 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
                 variant="outlined"
                 color="inherit"
                 size="small"
-                onClick={onClose}
+                onClick={onActivityEnded}
                 sx={{ fontWeight: 700, textTransform: 'none', borderRadius: '8px' }}
               >
-                Close Projector View
+                Close &amp; Keep Results
               </Button>
             ) : (
               <Button
@@ -912,8 +910,12 @@ export const LivePulseMeterModal: React.FC<LivePulseMeterModalProps> = ({
         <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
           {isConcluded ? 'PulseMeter is concluded. Final aggregate results are preserved above.' : 'Live Socket.io analytics feed connected.'}
         </Typography>
-        <Button onClick={onClose} variant={isConcluded ? 'contained' : 'outlined'} sx={{ textTransform: 'none', fontWeight: 700 }}>
-          {isConcluded ? 'Close Projector View' : 'Minimize Window'}
+        <Button
+          onClick={isConcluded ? onActivityEnded : onClose}
+          variant={isConcluded ? 'contained' : 'outlined'}
+          sx={{ textTransform: 'none', fontWeight: 700 }}
+        >
+          {isConcluded ? 'Close & Keep Results' : 'Minimize Window'}
         </Button>
       </DialogActions>
 

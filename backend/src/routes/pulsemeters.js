@@ -194,10 +194,19 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
     let liveActivity;
     try {
       const insertResult = await db.query(
-        `INSERT INTO live_activities (classroom_id, activity_type, activity_ref_id, attendance_session_id, attendance_pending)
-         VALUES ($1, 'PULSEMETER', $2, $3, $4)
+        `INSERT INTO live_activities
+           (classroom_id, activity_type, activity_ref_id, attendance_session_id, attendance_pending,
+            title_snapshot, config_snapshot)
+         VALUES ($1, 'PULSEMETER', $2, $3, $4, $5, $6)
          RETURNING *`,
-        [pm.classroom_id, pulseMeterId, attendanceSessionId, attendancePending]
+        [
+          pm.classroom_id,
+          pulseMeterId,
+          attendanceSessionId,
+          attendancePending,
+          pm.title,
+          JSON.stringify({ type: pm.type, config: pm.config }),
+        ]
       );
       liveActivity = insertResult.rows[0];
     } catch (insertErr) {
@@ -359,6 +368,16 @@ router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res
 
     if (pmCheck.rows[0].teacher_id !== req.user.id) {
       return res.status(403).json({ error: 'You do not have permission to delete this PulseMeter.' });
+    }
+
+    // Runs are historical records: refuse to delete a template that was launched.
+    const historyCheck = await db.query(
+      'SELECT 1 FROM live_activities WHERE activity_ref_id = $1 AND activity_type = $2 LIMIT 1',
+      [pulseMeterId, 'PULSEMETER']
+    );
+
+    if (historyCheck.rows.length > 0) {
+      return res.status(409).json({ error: 'This PulseMeter has live-run history and cannot be deleted.' });
     }
 
     await db.query('DELETE FROM pulsemeters WHERE id = $1', [pulseMeterId]);

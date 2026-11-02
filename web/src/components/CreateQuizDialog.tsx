@@ -35,6 +35,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import SchoolIcon from '@mui/icons-material/School';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface CreateQuizDialogProps {
   open: boolean;
@@ -43,12 +44,39 @@ interface CreateQuizDialogProps {
   onSuccess: () => void;
 }
 
+interface QuizOptionDraft {
+  // Stable id assigned once at creation. Never derived from the current index.
+  id: string;
+  text: string;
+}
+
 interface QuestionDraft {
   question_text: string;
-  options: string[];
-  correct_option_id: string; // 'a', 'b', etc.
+  options: QuizOptionDraft[];
+  correct_option_id: string;
   time_limit_seconds: number;
 }
+
+const createDefaultOptions = (): QuizOptionDraft[] =>
+  ['Option A', 'Option B', 'Option C', 'Option D'].map((text, index) => ({
+    id: String.fromCharCode(97 + index),
+    text,
+  }));
+
+const getNextOptionId = (options: QuizOptionDraft[]) => {
+  const maxIndex = options.reduce(
+    (max, option) => Math.max(max, option.id.charCodeAt(0) - 97),
+    -1
+  );
+  return String.fromCharCode(97 + maxIndex + 1);
+};
+
+const createDefaultQuestion = (): QuestionDraft => ({
+  question_text: '',
+  options: createDefaultOptions(),
+  correct_option_id: 'a',
+  time_limit_seconds: 20,
+});
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -60,28 +88,13 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
 }) => {
   const [title, setTitle] = useState('');
   const [scoringMode, setScoringMode] = useState<'WIDE' | 'NARROW'>('WIDE');
-  const [questions, setQuestions] = useState<QuestionDraft[]>([
-    {
-      question_text: '',
-      options: ['Option A', 'Option B', 'Option C', 'Option D'],
-      correct_option_id: 'a',
-      time_limit_seconds: 20,
-    },
-  ]);
+  const [questions, setQuestions] = useState<QuestionDraft[]>([createDefaultQuestion()]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleAddQuestion = () => {
-    setQuestions([
-      ...questions,
-      {
-        question_text: '',
-        options: ['Option A', 'Option B', 'Option C', 'Option D'],
-        correct_option_id: 'a',
-        time_limit_seconds: 20,
-      },
-    ]);
+    setQuestions([...questions, createDefaultQuestion()]);
   };
 
   const handleRemoveQuestion = (qIndex: number) => {
@@ -91,49 +104,59 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
   };
 
   const handleQuestionTextChange = (qIndex: number, text: string) => {
-    const updated = [...questions];
-    updated[qIndex].question_text = text;
-    setQuestions(updated);
+    setQuestions(questions.map((q, idx) => (idx === qIndex ? { ...q, question_text: text } : q)));
   };
 
   const handleTimeLimitChange = (qIndex: number, seconds: number) => {
-    const updated = [...questions];
-    updated[qIndex].time_limit_seconds = seconds;
-    setQuestions(updated);
+    setQuestions(
+      questions.map((q, idx) => (idx === qIndex ? { ...q, time_limit_seconds: seconds } : q))
+    );
   };
 
   const handleOptionChange = (qIndex: number, optIndex: number, text: string) => {
-    const updated = [...questions];
-    updated[qIndex].options[optIndex] = text;
-    setQuestions(updated);
+    setQuestions(
+      questions.map((q, idx) =>
+        idx === qIndex
+          ? {
+              ...q,
+              options: q.options.map((opt, oIdx) => (oIdx === optIndex ? { ...opt, text } : opt)),
+            }
+          : q
+      )
+    );
   };
 
   const handleCorrectOptionChange = (qIndex: number, optId: string) => {
-    const updated = [...questions];
-    updated[qIndex].correct_option_id = optId;
-    setQuestions(updated);
+    setQuestions(
+      questions.map((q, idx) => (idx === qIndex ? { ...q, correct_option_id: optId } : q))
+    );
   };
 
   const handleAddOption = (qIndex: number) => {
-    const updated = [...questions];
-    if (updated[qIndex].options.length < 6) {
-      const nextId = String.fromCharCode(65 + updated[qIndex].options.length);
-      updated[qIndex].options.push(`Option ${nextId}`);
-      setQuestions(updated);
-    }
+    setQuestions(
+      questions.map((q, idx) => {
+        if (idx !== qIndex || q.options.length >= 6) return q;
+        const nextId = getNextOptionId(q.options);
+        return {
+          ...q,
+          options: [...q.options, { id: nextId, text: `Option ${nextId.toUpperCase()}` }],
+        };
+      })
+    );
   };
 
   const handleRemoveOption = (qIndex: number, optIndex: number) => {
-    const updated = [...questions];
-    if (updated[qIndex].options.length > 2) {
-      updated[qIndex].options.splice(optIndex, 1);
-      // Reset correct option if deleted
-      const optId = String.fromCharCode(97 + optIndex);
-      if (updated[qIndex].correct_option_id === optId) {
-        updated[qIndex].correct_option_id = 'a';
-      }
-      setQuestions(updated);
-    }
+    setQuestions(
+      questions.map((q, idx) => {
+        if (idx !== qIndex || q.options.length <= 2) return q;
+        const options = q.options.filter((_, oIdx) => oIdx !== optIndex);
+        // Remap the correct answer if the removed option was the marked one.
+        const correctOptionId = options.some((opt) => opt.id === q.correct_option_id)
+          ? q.correct_option_id
+          : options[0].id;
+        return { ...q, options, correct_option_id: correctOptionId };
+      })
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -145,16 +168,26 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
       return;
     }
 
-    // Validate all questions
+    // Validate exactly the array that will be submitted. Blank options never reach the server.
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       if (!q.question_text.trim()) {
         setError(`Question #${i + 1} text cannot be empty.`);
         return;
       }
-      const validOptions = q.options.map(o => o.trim()).filter(Boolean);
-      if (validOptions.length < 2) {
-        setError(`Question #${i + 1} must have at least 2 non-empty options.`);
+      if (q.options.length < 2) {
+        setError(`Question #${i + 1} must have at least 2 options.`);
+        return;
+      }
+      const blankOptionIndex = q.options.findIndex((opt) => !opt.text.trim());
+      if (blankOptionIndex !== -1) {
+        setError(
+          `Question #${i + 1} option ${String.fromCharCode(65 + blankOptionIndex)} cannot be empty.`
+        );
+        return;
+      }
+      if (!q.options.some((opt) => opt.id === q.correct_option_id)) {
+        setError(`Question #${i + 1} is missing a valid correct answer.`);
         return;
       }
     }
@@ -164,21 +197,20 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
     try {
       const formattedQuestions = questions.map((q, qIdx) => ({
         question_text: q.question_text.trim(),
-        options: q.options.map((opt, optIdx) => ({
-          id: String.fromCharCode(97 + optIdx),
-          text: opt.trim(),
+        options: q.options.map((opt) => ({
+          id: opt.id,
+          text: opt.text.trim(),
         })),
         correct_option_id: q.correct_option_id,
         order_index: qIdx,
         time_limit_seconds: q.time_limit_seconds,
       }));
 
-      const token = localStorage.getItem('classpulse_token');
       const response = await fetch(`${API_BASE_URL}/quizzes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           classroom_id: classroomId,
@@ -194,14 +226,7 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
         // Reset form
         setTitle('');
         setScoringMode('WIDE');
-        setQuestions([
-          {
-            question_text: '',
-            options: ['Option A', 'Option B', 'Option C', 'Option D'],
-            correct_option_id: 'a',
-            time_limit_seconds: 20,
-          },
-        ]);
+        setQuestions([createDefaultQuestion()]);
         onSuccess();
         onClose();
       } else {
@@ -447,13 +472,12 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
                     >
                       <Stack spacing={1.25}>
                         {q.options.map((opt, optIdx) => {
-                          const optId = String.fromCharCode(97 + optIdx);
-                          const isCorrect = q.correct_option_id === optId;
+                          const isCorrect = q.correct_option_id === opt.id;
                           return (
-                            <Stack direction="row" spacing={1} key={optIdx} alignItems="center">
+                            <Stack direction="row" spacing={1} key={opt.id} alignItems="center">
                               <Tooltip title={isCorrect ? 'Marked as Correct Answer' : 'Click radio to mark as Correct'}>
                                 <FormControlLabel
-                                  value={optId}
+                                  value={opt.id}
                                   control={<Radio size="small" color="success" />}
                                   label=""
                                   sx={{ m: 0 }}
@@ -465,7 +489,7 @@ export const CreateQuizDialog: React.FC<CreateQuizDialogProps> = ({
                               <TextField
                                 size="small"
                                 placeholder={`Option ${String.fromCharCode(65 + optIdx)} text`}
-                                value={opt}
+                                value={opt.text}
                                 onChange={(e) => handleOptionChange(qIdx, optIdx, e.target.value)}
                                 fullWidth
                                 required

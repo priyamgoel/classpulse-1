@@ -243,3 +243,26 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_doubt_posts_search_gin ON doubt_posts USING gin(search_vector);
+
+-- =========================================================
+-- ITERATION 3: LIVE ACTIVITY HISTORY & DURABLE QUIZ STATE
+-- =========================================================
+
+-- Run snapshots so history survives template edits/deletes
+ALTER TABLE live_activities ADD COLUMN IF NOT EXISTS title_snapshot TEXT;
+ALTER TABLE live_activities ADD COLUMN IF NOT EXISTS config_snapshot JSONB;
+
+-- Durable per-question quiz state (replaces the in-memory Map)
+CREATE TABLE IF NOT EXISTS activity_question_states (
+  live_activity_id UUID NOT NULL REFERENCES live_activities(id) ON DELETE CASCADE,
+  question_id      UUID NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+  started_at_ms    BIGINT NOT NULL,
+  ends_at_ms       BIGINT NOT NULL,
+  revealed         BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY (live_activity_id, question_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_activities_history
+  ON live_activities (classroom_id, activity_type, status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quiz_responses_activity_student
+  ON quiz_responses (live_activity_id, student_id);

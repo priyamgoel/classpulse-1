@@ -18,6 +18,13 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Tabs,
+  Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -28,9 +35,13 @@ import LinearScaleIcon from '@mui/icons-material/LinearScale';
 import SpeedIcon from '@mui/icons-material/Speed';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import HistoryIcon from '@mui/icons-material/History';
 import { CreatePulseMeterDialog } from './CreatePulseMeterDialog';
 import { LivePulseMeterModal, PulseMeterInfo } from './LivePulseMeterModal';
+import { PulseMeterResultsDialog } from './PulseMeterResultsDialog';
 import { m3Tokens } from '@/theme/tokens';
+import { getAuthHeaders } from '@/lib/authStorage';
 
 interface PulseMeterAuthoringViewProps {
   classroomId: string;
@@ -47,6 +58,23 @@ export interface PulseMeter {
   created_at: string;
 }
 
+export interface PulseMeterPastRun {
+  id: string;
+  activity_type: 'PULSEMETER' | 'QUIZ';
+  status: 'ACTIVE' | 'ENDED';
+  started_at: string;
+  ended_at?: string | null;
+  title: string;
+  type: 'WORD_CLOUD' | 'MCQ' | 'RATING_SCALE';
+  scoring_mode?: string | null;
+  question_count?: number;
+  response_count?: number;
+  participant_count?: number;
+  present_count?: number;
+  blocked_count?: number;
+  avg_score?: number | null;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = ({ classroomId }) => {
@@ -55,6 +83,15 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingPulseMeter, setEditingPulseMeter] = useState<PulseMeter | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Library / Past Runs tabs
+  const [viewTab, setViewTab] = useState(0);
+  const [pastRuns, setPastRuns] = useState<PulseMeterPastRun[]>([]);
+  const [loadingPastRuns, setLoadingPastRuns] = useState(false);
+
+  // Historical results dialog
+  const [resultsActivity, setResultsActivity] = useState<PulseMeterPastRun | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
 
   // Live Activity State
   const [launchingId, setLaunchingId] = useState<string | null>(null);
@@ -69,16 +106,16 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
   useEffect(() => {
     if (classroomId) {
       fetchPulsemeters();
+      fetchPastRuns();
     }
   }, [classroomId]);
 
   const handleDeletePulseMeter = async (id: string) => {
     setDeleting(true);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/pulsemeters/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         setDeleteConfirmId(null);
@@ -98,12 +135,11 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
     setLaunchingId(pm.id);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/pulsemeters/${pm.id}/launch`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
       });
 
@@ -131,9 +167,8 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('classpulse_token');
       const res = await fetch(`${API_BASE_URL}/pulsemeters?classroom_id=${classroomId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (res.ok) {
@@ -145,6 +180,67 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
       setError('Network error fetching PulseMeters');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPastRuns = async () => {
+    if (!classroomId) return;
+    setLoadingPastRuns(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/live-activities?classroom_id=${classroomId}&activity_type=PULSEMETER&status=ENDED&limit=50`,
+        { headers: getAuthHeaders() }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPastRuns((data as any)?.activities || []);
+      } else {
+        setError((data as any)?.error || 'Failed to fetch past PulseMeter runs');
+      }
+    } catch {
+      setError('Network error fetching past PulseMeter runs');
+    } finally {
+      setLoadingPastRuns(false);
+    }
+  };
+
+  const handleOpenResults = (run: PulseMeterPastRun) => {
+    setResultsActivity(run);
+    setResultsOpen(true);
+  };
+
+  const renderRunTypeChip = (type?: string) => {
+    switch (type) {
+      case 'WORD_CLOUD':
+        return (
+          <Chip
+            icon={<CloudQueueIcon sx={{ fontSize: '1rem !important' }} />}
+            label="Word Cloud"
+            size="small"
+            sx={{ bgcolor: m3Tokens.color.primaryContainer, color: m3Tokens.color.onPrimaryContainer, fontWeight: 700, fontSize: '0.72rem' }}
+          />
+        );
+      case 'MCQ':
+        return (
+          <Chip
+            icon={<CheckCircleOutlineIcon sx={{ fontSize: '1rem !important' }} />}
+            label="MCQ"
+            size="small"
+            sx={{ bgcolor: m3Tokens.color.secondaryContainer, color: m3Tokens.color.onSecondaryContainer, fontWeight: 700, fontSize: '0.72rem' }}
+          />
+        );
+      case 'RATING_SCALE':
+        return (
+          <Chip
+            icon={<LinearScaleIcon sx={{ fontSize: '1rem !important' }} />}
+            label="Rating Scale"
+            size="small"
+            sx={{ bgcolor: m3Tokens.color.tertiaryContainer, color: m3Tokens.color.onTertiaryContainer, fontWeight: 700, fontSize: '0.72rem' }}
+          />
+        );
+      default:
+        return <Chip label={type || 'PulseMeter'} size="small" />;
     }
   };
 
@@ -229,7 +325,14 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
           >
             Create PulseMeter
           </Button>
-          <IconButton size="small" onClick={fetchPulsemeters} title="Refresh PulseMeters">
+          <IconButton
+            size="small"
+            onClick={() => {
+              fetchPulsemeters();
+              fetchPastRuns();
+            }}
+            title="Refresh PulseMeters"
+          >
             <RefreshIcon fontSize="small" />
           </IconButton>
         </Stack>
@@ -241,7 +344,14 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
         </Alert>
       )}
 
-      {loading ? (
+      <Box sx={{ borderBottom: `1px solid ${m3Tokens.color.outlineVariant}`, mb: 3 }}>
+        <Tabs value={viewTab} onChange={(_, val) => setViewTab(val)}>
+          <Tab label={`Library (${pulsemeters.length})`} sx={{ textTransform: 'none', fontWeight: 700 }} />
+          <Tab label={`Past Runs (${pastRuns.length})`} sx={{ textTransform: 'none', fontWeight: 700 }} />
+        </Tabs>
+      </Box>
+
+      {viewTab === 0 && (loading ? (
         <Box sx={{ py: 6, textAlign: 'center' }}>
           <CircularProgress size={32} />
           <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 1 }}>
@@ -405,6 +515,143 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
             </Grid>
           ))}
         </Grid>
+      ))}
+
+      {viewTab === 1 && (
+        <Box>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+            <Box>
+              <Typography variant="subtitle1" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
+                Past PulseMeter Runs
+              </Typography>
+              <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                Every ended live activity keeps its responses and moderation history.
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={fetchPastRuns} title="Refresh past runs">
+              <RefreshIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+
+          {loadingPastRuns ? (
+            <Box sx={{ py: 6, textAlign: 'center' }}>
+              <CircularProgress size={32} />
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 1 }}>
+                Loading past runs...
+              </Typography>
+            </Box>
+          ) : pastRuns.length === 0 ? (
+            <Paper
+              elevation={0}
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: '12px',
+                border: `1px dashed ${m3Tokens.color.outlineVariant}`,
+                bgcolor: '#FFFFFF',
+              }}
+            >
+              <HistoryIcon sx={{ fontSize: 48, color: m3Tokens.color.primary, opacity: 0.6, mb: 1 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface, mb: 0.5 }}>
+                No Past Runs
+              </Typography>
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, maxWidth: 450, mx: 'auto', mb: 2.5 }}>
+                No PulseMeter runs yet — launch one from the Library.
+              </Typography>
+              <Button
+                variant="outlined"
+                startIcon={<PlayArrowIcon />}
+                onClick={() => setViewTab(0)}
+                sx={{ fontWeight: 700, textTransform: 'none' }}
+              >
+                Go to Library
+              </Button>
+            </Paper>
+          ) : (
+            <Paper
+              elevation={0}
+              sx={{
+                borderRadius: '12px',
+                border: `1px solid ${m3Tokens.color.outlineVariant}`,
+                overflow: 'hidden',
+                bgcolor: '#FFFFFF',
+              }}
+            >
+              <Table>
+                <TableHead sx={{ bgcolor: '#F8F9FA' }}>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      DATE / TIME
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      TITLE
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      TYPE
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      RESPONDED
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      STATUS
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 800, fontSize: '0.75rem', color: m3Tokens.color.onSurfaceVariant }}>
+                      RESULTS
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pastRuns.map((run) => (
+                    <TableRow key={run.id} hover>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                          {run.started_at
+                            ? new Date(run.started_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+                            : '--'}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                          {run.started_at
+                            ? new Date(run.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            : ''}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
+                          {run.title || 'Untitled PulseMeter'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{renderRunTypeChip(run.type)}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurface }}>
+                          Responded <strong>{run.participant_count ?? run.response_count ?? 0}</strong> / {run.present_count ?? '--'}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label="ENDED"
+                          size="small"
+                          color="success"
+                          sx={{ fontWeight: 800, height: 20, fontSize: '0.65rem' }}
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VisibilityIcon fontSize="small" />}
+                          onClick={() => handleOpenResults(run)}
+                          sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
+                        >
+                          View Results
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Paper>
+          )}
+        </Box>
       )}
 
       {/* Delete Confirmation Dialog */}
@@ -461,9 +708,19 @@ export const PulseMeterAuthoringView: React.FC<PulseMeterAuthoringViewProps> = (
             setActiveActivityId(null);
             setActivePulsemeter(null);
             fetchPulsemeters();
+            fetchPastRuns();
           }}
         />
       )}
+
+      {/* Historical Results Dialog (Past Runs) */}
+      <PulseMeterResultsDialog
+        open={resultsOpen}
+        onClose={() => setResultsOpen(false)}
+        activityId={resultsActivity?.id || null}
+        title={resultsActivity?.title}
+        type={resultsActivity?.type}
+      />
     </Box>
   );
 };

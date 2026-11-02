@@ -10,8 +10,10 @@ const router = express.Router();
  * Author a reusable live quiz with multi-choice questions and WIDE/NARROW scoring mode.
  */
 router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => {
-  const client = await db.pool.connect();
+  let client = null;
+  let inTransaction = false;
   try {
+    client = await db.pool.connect();
     const { classroom_id, title, scoring_mode, questions } = req.body;
 
     if (!classroom_id || !title || !questions || !Array.isArray(questions) || questions.length === 0) {
@@ -85,6 +87,7 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
 
     // Begin transaction for Quiz + Questions
     await client.query('BEGIN');
+    inTransaction = true;
 
     const quizInsertRes = await client.query(
       `INSERT INTO quizzes (classroom_id, created_by, title, scoring_mode)
@@ -106,6 +109,7 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
     }
 
     await client.query('COMMIT');
+    inTransaction = false;
 
     res.status(201).json({
       message: 'Quiz authored successfully',
@@ -115,11 +119,20 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
       },
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client && inTransaction) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        console.error('[ClassPulse Quiz] Error rolling back quiz creation:', rollbackErr);
+      }
+      inTransaction = false;
+    }
     console.error('[ClassPulse Quiz] Error creating quiz:', err);
-    res.status(500).json({ error: 'Failed to author quiz.' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to author quiz.' });
+    }
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -247,14 +260,36 @@ router.post('/:id/launch', authenticateToken, requireRole('teacher'), async (req
       attendancePending = true;
     }
 
-    // Create live activity (partial unique index enforces one-active-per-classroom)
+    // Create live activity (partial unique index enforces one-active-per-classroom).
+    // The snapshot keeps this run readable even if the template is later edited/deleted.
+    const configSnapshot = {
+      scoring_mode: quiz.scoring_mode,
+      questions: questionsRes.rows.map((q) => ({
+        id: q.id,
+        question_text: q.question_text,
+        options: q.options,
+        correct_option_id: q.correct_option_id,
+        order_index: q.order_index,
+        time_limit_seconds: q.time_limit_seconds,
+      })),
+    };
+
     let liveActivity;
     try {
       const insertResult = await db.query(
-        `INSERT INTO live_activities (classroom_id, activity_type, activity_ref_id, attendance_session_id, attendance_pending)
-         VALUES ($1, 'QUIZ', $2, $3, $4)
+        `INSERT INTO live_activities
+           (classroom_id, activity_type, activity_ref_id, attendance_session_id, attendance_pending,
+            title_snapshot, config_snapshot)
+         VALUES ($1, 'QUIZ', $2, $3, $4, $5, $6)
          RETURNING *`,
-        [quiz.classroom_id, quizId, attendanceSessionId, attendancePending]
+        [
+          quiz.classroom_id,
+          quizId,
+          attendanceSessionId,
+          attendancePending,
+          quiz.title,
+          JSON.stringify(configSnapshot),
+        ]
       );
       liveActivity = insertResult.rows[0];
     } catch (insertErr) {
@@ -327,6 +362,16 @@ router.delete('/:id', authenticateToken, requireRole('teacher'), async (req, res
 
     if (quizCheck.rows[0].teacher_id !== req.user.id) {
       return res.status(403).json({ error: 'You do not have permission to delete this Quiz.' });
+    }
+
+    // Runs are historical records: refuse to delete a quiz that was launched.
+    const historyCheck = await db.query(
+      'SELECT 1 FROM live_activities WHERE activity_ref_id = $1 AND activity_type = $2 LIMIT 1',
+      [quizId, 'QUIZ']
+    );
+
+    if (historyCheck.rows.length > 0) {
+      return res.status(409).json({ error: 'This quiz has live-run history and cannot be deleted.' });
     }
 
     await db.query('DELETE FROM quizzes WHERE id = $1', [quizId]);
