@@ -31,6 +31,31 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
       return res.status(403).json({ error: 'Forbidden: You do not teach this classroom' });
     }
 
+    // Idempotency: if this classroom already has a live session (e.g. a
+    // previous attempt reported an error after the row was inserted), reuse it
+    // instead of stacking duplicate "never ended" sessions.
+    const existingActive = await db.query(
+      `SELECT * FROM sessions
+       WHERE classroom_id = $1 AND ended_at IS NULL
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [classroom_id]
+    );
+
+    if (existingActive.rows.length > 0) {
+      return res.status(200).json({
+        message: 'An attendance session is already active for this classroom',
+        already_active: true,
+        session: {
+          ...existingActive.rows[0],
+          course_code: classroomCheck.rows[0].course_code,
+          course_name: classroomCheck.rows[0].course_name,
+          section_name: classroomCheck.rows[0].section_name,
+        },
+        initial_tokens: null,
+      });
+    }
+
     // Create session in database
     const sessionResult = await db.query(
       `INSERT INTO sessions (classroom_id, started_at)
@@ -41,8 +66,16 @@ router.post('/', authenticateToken, requireRole('teacher'), async (req, res) => 
 
     const session = sessionResult.rows[0];
 
-    // Pre-generate the first batch of 3-QR tokens
-    const tokenBatch = await generate3QrSequence(session.id);
+    // Pre-generate the first batch of 3-QR tokens.
+    // Token generation is a cache operation: if it fails the session is still
+    // live and the projector will retry, so it must never fail the request
+    // (which previously reported "failed" while a session had been created).
+    let tokenBatch = null;
+    try {
+      tokenBatch = await generate3QrSequence(session.id);
+    } catch (tokenErr) {
+      console.error('Session created but initial QR token batch generation failed:', tokenErr);
+    }
 
     res.status(201).json({
       message: 'Attendance session started successfully',

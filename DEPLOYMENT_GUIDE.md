@@ -125,7 +125,45 @@ Follow these click-by-click instructions to deploy ClassPulse for real-device te
 
 ---
 
-## 3. Iteration 1 Definition of Done Checklist
+## 3. Troubleshooting: "Failed to start attendance session"
+
+This error appears when the QR token cache (Upstash Redis) is unreachable. Because the
+session row is written to PostgreSQL *before* the first token batch is generated, a dead
+Redis used to leave you with a 500 error, an "active" session after refresh, and a blank
+QR projector.
+
+**Diagnose it in one request:**
+
+```bash
+curl https://classpulse-api-09dw.onrender.com/health
+```
+
+```json
+{ "status": "ok", "redis": { "status": "degraded", "backend": "memory", "reason": "getaddrinfo ENOTFOUND ..." } }
+```
+
+`redis.status = "degraded"` means QR tokens are being kept in this backend instance's
+memory instead of Upstash.
+
+**Fix (root cause):** free Upstash databases are deleted after long inactivity, and the
+hostname stops resolving (`getaddrinfo ENOTFOUND <name>.upstash.io`).
+
+1. Sign in to [console.upstash.com](https://console.upstash.com) and create a new Redis
+   database (region close to your Render service).
+2. Copy its **TLS** connection string (starts with `rediss://`) into `REDIS_URL`:
+   - locally in `backend/.env`
+   - in **Render → classpulse-api → Environment**
+3. Save the Render env change and let the service redeploy (or click *Manual Deploy*).
+4. Re-check `/health` — `redis.status` should now be `connected`.
+
+> The backend no longer fails requests when Redis is down: it automatically falls back to
+> an in-memory cache so a single-instance deployment keeps working. That fallback is
+> per-instance only, so fix `REDIS_URL` before scaling to multiple instances (tokens issued
+> by one instance would not be visible to another).
+
+---
+
+## 4. Iteration 1 Definition of Done Checklist
 
 | Feature | Requirement | Status |
 |---|---|:---:|

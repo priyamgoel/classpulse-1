@@ -5,7 +5,7 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 
 const db = require('./db');
-const { getRedisClient } = require('./redis');
+const { getRedisClient, getRedisStatus } = require('./redis');
 const authRoutes = require('./routes/auth');
 const coursesRoutes = require('./routes/courses');
 const classroomsRoutes = require('./routes/classrooms');
@@ -110,6 +110,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
+    redis: getRedisStatus(),
   });
 });
 
