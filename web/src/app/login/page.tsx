@@ -14,10 +14,14 @@ import {
   FormControlLabel,
   Checkbox,
   Link as MuiLink,
+  IconButton,
+  InputAdornment,
 } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAuth } from '@/context/AuthContext';
 import { getAuthToken, getStoredUser, isTokenExpired } from '@/lib/authStorage';
 import { m3Tokens } from '@/theme/tokens';
@@ -25,6 +29,7 @@ import { m3Tokens } from '@/theme/tokens';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -127,11 +132,24 @@ export default function LoginPage() {
                 />
                 <TextField
                   label="Password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   fullWidth
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          edge="end"
+                          aria-label={showPassword ? 'Hide password' : 'Show password'}
+                          onClick={() => setShowPassword((prev) => !prev)}
+                        >
+                          {showPassword ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
                 <FormControlLabel
                   control={
