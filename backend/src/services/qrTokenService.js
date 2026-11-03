@@ -8,6 +8,16 @@ if (!HMAC_SECRET) {
 }
 const TOKEN_TTL_SECONDS = 15;
 const MAX_TOKEN_AGE_MS = 10000; // 10s freshness window per technical specification
+// How long an already-created batch may be reused when a client asks for the
+// current tokens. This must not align with the client's polling interval: when
+// it was 8s and the client also polled every 8s, a poll landing a few
+// milliseconds early reused an almost-expired batch, which then stayed on
+// screen for another full interval (up to ~16s old) and was rejected by the
+// server's 10s freshness check.
+const BATCH_REUSE_MS = 4000;
+// Never hand out a batch that is already within this margin of expiry, even
+// if a caller explicitly asks for a larger reuse window.
+const MIN_FRESHNESS_MARGIN_MS = 1000;
 
 // Helper to compute HMAC-SHA256 signature
 function computeHmac(payloadString) {
@@ -22,12 +32,14 @@ function computeHmac(payloadString) {
  *
  * @param {string} sessionId
  * @param {{ maxAgeMs?: number }} [options]
- * @returns {Promise<{ batch_id: string, timestamp: number, expires_in_seconds: number, tokens: Array }>}
+ * @returns {Promise<{ batch_id: string, timestamp: number, expires_in_seconds: number, fresh_for_ms: number, tokens: Array }>}
  */
 async function generate3QrSequence(sessionId, options = {}) {
   const redis = getRedisClient();
   const parsedMaxAge = Number(options.maxAgeMs);
-  const maxAgeMs = Number.isFinite(parsedMaxAge) && parsedMaxAge >= 0 ? parsedMaxAge : 8000;
+  const requestedMaxAge =
+    Number.isFinite(parsedMaxAge) && parsedMaxAge >= 0 ? parsedMaxAge : BATCH_REUSE_MS;
+  const maxAgeMs = Math.min(requestedMaxAge, MAX_TOKEN_AGE_MS - MIN_FRESHNESS_MARGIN_MS);
 
   // Reuse the most recent batch while it is still fresh.
   const latestBatchId = await redis.get(`session:${sessionId}:latest_batch`);
@@ -49,10 +61,10 @@ async function generate3QrSequence(sessionId, options = {}) {
           return {
             batch_id: cached.batchId || cached.batch_id || latestBatchId,
             timestamp: cachedTimestamp,
-            expires_in_seconds: Math.max(
-              0,
-              TOKEN_TTL_SECONDS - Math.floor(ageMs / 1000)
+            expires_in_seconds: Math.ceil(
+              Math.max(0, MAX_TOKEN_AGE_MS - ageMs) / 1000
             ),
+            fresh_for_ms: Math.max(0, MAX_TOKEN_AGE_MS - ageMs),
             tokens: cached.tokens,
           };
         }
@@ -92,7 +104,8 @@ async function generate3QrSequence(sessionId, options = {}) {
     });
   }
 
-  // Cache in Redis with 15-second expiration
+  // Cache in Redis with a 15-second expiration (5s grace beyond the 10s
+  // freshness check so in-flight scans are not rejected by cache eviction).
   const redisKey = `session:${sessionId}:batch:${batchId}`;
   await redis.set(redisKey, JSON.stringify({ batchId, timestamp, tokens }), 'EX', TOKEN_TTL_SECONDS);
   await redis.set(`session:${sessionId}:latest_batch`, batchId, 'EX', TOKEN_TTL_SECONDS);
@@ -100,7 +113,8 @@ async function generate3QrSequence(sessionId, options = {}) {
   return {
     batch_id: batchId,
     timestamp,
-    expires_in_seconds: TOKEN_TTL_SECONDS,
+    expires_in_seconds: Math.ceil(MAX_TOKEN_AGE_MS / 1000),
+    fresh_for_ms: MAX_TOKEN_AGE_MS,
     tokens,
   };
 }
@@ -292,4 +306,5 @@ module.exports = {
   validateAndMarkAttendance,
   TOKEN_TTL_SECONDS,
   MAX_TOKEN_AGE_MS,
+  BATCH_REUSE_MS,
 };

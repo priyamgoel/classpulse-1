@@ -12,6 +12,7 @@ const {
   validateAndMarkAttendance,
   TOKEN_TTL_SECONDS,
   MAX_TOKEN_AGE_MS,
+  BATCH_REUSE_MS,
 } = require('../src/services/qrTokenService');
 
 const SESSION = '55555555-5555-4555-8555-555555555555';
@@ -108,11 +109,31 @@ test('generate3QrSequence reuses the latest cached batch while it is fresh', asy
   assert.notEqual(third.batch_id, first.batch_id);
 });
 
+test('batch reuse window leaves a safe margin below the 10s freshness limit', async () => {
+  assert.ok(BATCH_REUSE_MS < MAX_TOKEN_AGE_MS);
+
+  const batch = await generate3QrSequence(SESSION);
+  // Simulate a batch that is already inside the final expiry margin. Even when
+  // a caller asks for a large reuse window, it must not be handed out again.
+  const staleTimestamp = Date.now() - (MAX_TOKEN_AGE_MS - 500);
+  const stale = ageBatch(batch, staleTimestamp);
+  await fakeRedis.set(
+    `session:${SESSION}:batch:${batch.batch_id}`,
+    JSON.stringify(stale)
+  );
+  await fakeRedis.set(`session:${SESSION}:latest_batch`, batch.batch_id);
+
+  const next = await generate3QrSequence(SESSION, { maxAgeMs: MAX_TOKEN_AGE_MS });
+  assert.notEqual(next.batch_id, batch.batch_id);
+  assert.equal(next.fresh_for_ms, MAX_TOKEN_AGE_MS);
+});
+
 test('generate3QrSequence returns exactly three signed, ordered frames', async () => {
   const batch = await generate3QrSequence(SESSION);
 
   assert.equal(batch.tokens.length, 3);
-  assert.equal(batch.expires_in_seconds, TOKEN_TTL_SECONDS);
+  assert.equal(batch.expires_in_seconds, Math.ceil(MAX_TOKEN_AGE_MS / 1000));
+  assert.equal(batch.fresh_for_ms, MAX_TOKEN_AGE_MS);
   assert.equal(new Set(batch.tokens.map((t) => t.batch_id)).size, 1);
   assert.deepEqual(batch.tokens.map((t) => t.seq_idx), [0, 1, 2]);
 
