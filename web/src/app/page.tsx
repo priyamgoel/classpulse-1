@@ -414,18 +414,17 @@ export default function HomePage() {
                             <PeopleIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Delete Classroom" placement="top">
-                          <IconButton
-                            size="small"
-                            sx={{ bgcolor: '#FEE2E2' }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmClassroom(classroom);
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" sx={{ color: '#DC2626' }} />
-                          </IconButton>
-                        </Tooltip>
+                        <IconButton
+                          size="small"
+                          aria-label="Delete classroom"
+                          sx={{ bgcolor: '#FEE2E2' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirmClassroom(classroom);
+                          }}
+                        >
+                          <DeleteIcon fontSize="small" sx={{ color: '#DC2626' }} />
+                        </IconButton>
                       </Stack>
                     </Box>
                   </Grid>
