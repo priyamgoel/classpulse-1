@@ -414,7 +414,7 @@ export default function HomePage() {
                             <PeopleIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <Tooltip title="Delete Classroom (End of Semester)">
+                        <Tooltip title="Delete Classroom" placement="top">
                           <IconButton
                             size="small"
                             sx={{ bgcolor: '#FEE2E2' }}

@@ -116,5 +116,25 @@ export const theme = createTheme({
         },
       },
     },
+    MuiTooltip: {
+      defaultProps: {
+        arrow: true,
+      },
+      styleOverrides: {
+        tooltip: {
+          backgroundColor: '#FFFFFF',
+          color: m3Tokens.color.onSurface,
+          border: `1px solid ${m3Tokens.color.outlineVariant}`,
+          borderRadius: '8px',
+          boxShadow: '0px 2px 8px rgba(0, 0, 0, 0.12)',
+          padding: '6px 10px',
+          fontSize: '0.75rem',
+          fontWeight: 500,
+        },
+        arrow: {
+          color: '#FFFFFF',
+        },
+      },
+    },
   },
 });
