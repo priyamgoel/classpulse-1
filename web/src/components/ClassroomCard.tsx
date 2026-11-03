@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Card, CardContent, Typography, Box, Chip, Stack } from '@mui/material';
-import SchoolIcon from '@mui/icons-material/School';
 import PeopleIcon from '@mui/icons-material/People';
 import { m3Tokens } from '@/theme/tokens';
 
@@ -78,7 +77,6 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
               {sectionName}
             </Typography>
           </Box>
-          <SchoolIcon sx={{ color: m3Tokens.color.primary }} />
         </Stack>
 
         {/* Micro-Metrics Strip (Iteration 2 — Part 8) */}

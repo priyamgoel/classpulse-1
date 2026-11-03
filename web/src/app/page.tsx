@@ -393,7 +393,10 @@ export default function HomePage() {
                         <Tooltip title="View Join Credentials & QR">
                           <IconButton
                             size="small"
-                            sx={{ bgcolor: m3Tokens.color.surfaceVariant }}
+                            sx={{
+                              bgcolor: m3Tokens.color.surfaceVariant,
+                              '&:hover': { bgcolor: m3Tokens.color.outlineVariant },
+                            }}
                             onClick={(e) => {
                               e.stopPropagation();
                               setJoinModalClassroom(classroom);
@@ -405,7 +408,10 @@ export default function HomePage() {
                         <Tooltip title="View Student Roster">
                           <IconButton
                             size="small"
-                            sx={{ bgcolor: m3Tokens.color.surfaceVariant }}
+                            sx={{
+                              bgcolor: m3Tokens.color.surfaceVariant,
+                              '&:hover': { bgcolor: m3Tokens.color.outlineVariant },
+                            }}
                             onClick={(e) => {
                               e.stopPropagation();
                               setRosterDialogClassroom(classroom);
@@ -417,7 +423,10 @@ export default function HomePage() {
                         <IconButton
                           size="small"
                           aria-label="Delete classroom"
-                          sx={{ bgcolor: '#FEE2E2' }}
+                          sx={{
+                            bgcolor: '#FEE2E2',
+                            '&:hover': { bgcolor: '#FECACA' },
+                          }}
                           onClick={(e) => {
                             e.stopPropagation();
                             setDeleteConfirmClassroom(classroom);
