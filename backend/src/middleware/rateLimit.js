@@ -9,6 +9,7 @@ function rateLimit({
   windowMs = 60 * 1000,
   max = 60,
   message = 'Too many requests. Please try again later.',
+  keyGenerator,
 } = {}) {
   const buckets = new Map();
 
@@ -24,7 +25,9 @@ function rateLimit({
     const now = Date.now();
     prune(now);
 
-    const key = req.ip || (req.socket && req.socket.remoteAddress) || 'unknown';
+    const key = keyGenerator
+      ? keyGenerator(req)
+      : (req.ip || (req.socket && req.socket.remoteAddress) || 'unknown');
     let bucket = buckets.get(key);
 
     if (!bucket || now - bucket.startedAt >= windowMs) {

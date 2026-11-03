@@ -194,6 +194,44 @@ test('rateLimit returns 429 once the per-IP threshold is exceeded', async () => 
   }
 });
 
+test('rateLimit honors a custom keyGenerator', async () => {
+  const limited = express();
+  limited.use(express.json());
+  limited.use(
+    rateLimit({
+      windowMs: 60 * 1000,
+      max: 1,
+      message: 'Too many attempts for this key.',
+      keyGenerator: (req) => {
+        const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+        return email ? `email:${email}` : 'anonymous';
+      },
+    })
+  );
+  limited.post('/ping', (_req, res) => res.json({ ok: true }));
+
+  const started = await start(limited);
+
+  try {
+    const firstA = await request(started.base, 'POST', '/ping', {
+      body: { email: 'A@Example.com' },
+    });
+    const firstB = await request(started.base, 'POST', '/ping', {
+      body: { email: 'b@example.com' },
+    });
+    const secondA = await request(started.base, 'POST', '/ping', {
+      body: { email: 'a@example.com' },
+    });
+
+    assert.equal(firstA.status, 200);
+    assert.equal(firstB.status, 200, 'a different generated key must not share the bucket');
+    assert.equal(secondA.status, 429);
+    assert.match(secondA.body.error, /Too many attempts for this key/);
+  } finally {
+    await started.close();
+  }
+});
+
 test('topic creation rejects an unknown course with 404', async () => {
   setHandler(async () => ({ rows: [] }));
 

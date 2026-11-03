@@ -202,8 +202,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     const result = await db.query(
       `SELECT s.*, c.section_name, c.teacher_id, co.course_code, co.course_name, u.full_name as teacher_name,
-              (SELECT COUNT(*)::int FROM attendance_records ar WHERE ar.session_id = s.id) as present_count,
-              (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id) as total_enrolled
+              (SELECT COUNT(*)::int FROM attendance_records ar
+                JOIN enrollments e ON e.classroom_id = c.id
+                  AND e.student_id = ar.student_id
+                  AND e.joined_at <= s.started_at
+                WHERE ar.session_id = s.id) as present_count,
+              (SELECT COUNT(*)::int FROM enrollments e WHERE e.classroom_id = c.id AND e.joined_at <= s.started_at) as total_enrolled
        FROM sessions s
        JOIN classrooms c ON s.classroom_id = c.id
        JOIN courses co ON c.course_id = co.id

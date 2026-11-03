@@ -36,6 +36,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
   }
 
   Future<void> _fetchDoubtDetails() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final token = AuthService.token;
@@ -44,6 +45,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
 
+      if (!mounted) return;
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -58,6 +60,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Network error loading discussion.';
         _isLoading = false;
@@ -75,10 +78,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'target_type': 'POST',
-          'target_id': _post!['id'],
-        }),
+        body: jsonEncode({'target_type': 'POST', 'target_id': _post!['id']}),
       );
 
       if (res.statusCode == 200) {
@@ -100,10 +100,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'target_type': 'REPLY',
-          'target_id': replyId,
-        }),
+        body: jsonEncode({'target_type': 'REPLY', 'target_id': replyId}),
       );
 
       if (res.statusCode == 200) {
@@ -123,31 +120,43 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
     try {
       final token = AuthService.token;
       final res = await http.post(
-        Uri.parse('${AuthService.baseUrl}/doubts/replies/$replyId/accept-solution'),
+        Uri.parse(
+          '${AuthService.baseUrl}/doubts/replies/$replyId/accept-solution',
+        ),
         headers: {'Authorization': 'Bearer $token'},
       );
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        final isSol = data['is_solution'] == true;
+        final resolved = data['post_status'] == 'RESOLVED';
+        final message =
+            data['message']?.toString() ??
+            (resolved
+                ? 'Reply marked as accepted solution'
+                : 'Reply unmarked as solution');
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              backgroundColor: isSol ? Colors.green : Colors.grey.shade800,
-              content: Text(isSol ? 'Marked as accepted solution!' : 'Solution mark removed'),
+              backgroundColor: resolved ? Colors.green : Colors.grey.shade800,
+              content: Text(message),
               duration: const Duration(seconds: 2),
             ),
           );
         }
+        if (!mounted) return;
         _fetchDoubtDetails();
       } else {
-        final data = jsonDecode(res.body);
+        String error = 'Failed to update solution';
+        try {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['error'] != null) {
+            error = data['error'].toString();
+          }
+        } catch (_) {}
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: Colors.red,
-              content: Text(data['error'] ?? 'Failed to update solution status'),
-            ),
+            SnackBar(backgroundColor: Colors.red, content: Text(error)),
           );
         }
       }
@@ -167,10 +176,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'body': body,
-          'is_anonymous': _replyAnonymous,
-        }),
+        body: jsonEncode({'body': body, 'is_anonymous': _replyAnonymous}),
       );
 
       if (res.statusCode == 201) {
@@ -195,42 +201,46 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
 
     final updated = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Question', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(),
-                ),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text(
+              'Edit Question',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: bodyCtrl,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Description',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bodyCtrl,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  border: OutlineInputBorder(),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Save'),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
     );
 
     if (updated != true) return;
@@ -276,27 +286,31 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
 
     final updated = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Answer', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: bodyCtrl,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            labelText: 'Answer',
-            border: OutlineInputBorder(),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text(
+              'Edit Answer',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: TextField(
+              controller: bodyCtrl,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                labelText: 'Answer',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Save'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
     );
 
     if (updated != true) return;
@@ -309,9 +323,7 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'body': bodyCtrl.text.trim(),
-        }),
+        body: jsonEncode({'body': bodyCtrl.text.trim()}),
       );
 
       if (res.statusCode == 200 && mounted) {
@@ -339,23 +351,27 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
   Future<void> _deletePost() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Question?', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text(
-          'Are you sure you want to delete this question? This will permanently delete the question and all associated answers.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text(
+              'Delete Question?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: const Text(
+              'Are you sure you want to delete this question? This will permanently delete the question and all associated answers.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
 
     if (confirm != true || _post == null) return;
@@ -392,23 +408,27 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
   Future<void> _deleteReply(String replyId) async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Answer?', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: const Text(
-          'Are you sure you want to delete this answer? This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text(
+              'Delete Answer?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            content: const Text(
+              'Are you sure you want to delete this answer? This action cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
 
     if (confirm != true) return;
@@ -444,14 +464,18 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canManagePost = _post != null &&
+    final canManagePost =
+        _post != null &&
         (_post!['author_id'] == AuthService.currentUser?.id ||
             AuthService.currentUser?.role == 'teacher');
 
     return Scaffold(
       backgroundColor: M3Tokens.surface,
       appBar: AppBar(
-        title: const Text('Discussion Thread', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        title: const Text(
+          'Discussion Thread',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
         actions: [
           if (canManagePost) ...[
             IconButton(
@@ -471,42 +495,46 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _post == null
+      body:
+          _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _post == null
               ? Center(child: Text(_errorMessage ?? 'Doubt not found'))
               : SafeArea(
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // Main Question Card
-                              _buildPostCard(),
-                              const SizedBox(height: 20),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Main Question Card
+                            _buildPostCard(),
+                            const SizedBox(height: 20),
 
-                              // Replies Header
-                              Text(
-                                '${_replies.length} ${_replies.length == 1 ? 'Answer' : 'Answers & Solutions'}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            // Replies Header
+                            Text(
+                              '${_replies.length} ${_replies.length == 1 ? 'Answer' : 'Answers & Solutions'}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
                               ),
-                              const SizedBox(height: 12),
+                            ),
+                            const SizedBox(height: 12),
 
-                              // Replies List
-                              ..._replies.map((r) => _buildReplyCard(r)),
-                            ],
-                          ),
+                            // Replies List
+                            ..._replies.map((r) => _buildReplyCard(r)),
+                          ],
                         ),
                       ),
+                    ),
 
-                      // Reply Input Composer Bar
-                      _buildReplyComposer(),
-                    ],
-                  ),
+                    // Reply Input Composer Bar
+                    _buildReplyComposer(),
+                  ],
                 ),
+              ),
     );
   }
 
@@ -521,7 +549,9 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(M3Tokens.shapeLarge),
-        border: Border.all(color: isResolved ? Colors.green : M3Tokens.outlineVariant),
+        border: Border.all(
+          color: isResolved ? Colors.green : M3Tokens.outlineVariant,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -532,12 +562,22 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
               if (isResolved)
                 Container(
                   margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.shade50,
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Text('SOLVED', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 10)),
+                  child: const Text(
+                    'SOLVED',
+                    style: TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  ),
                 ),
               Container(
                 margin: const EdgeInsets.only(right: 6),
@@ -548,19 +588,30 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                 ),
                 child: Text(
                   p['audience_scope'] ?? 'CLASSROOM',
-                  style: const TextStyle(color: M3Tokens.onPrimaryContainer, fontWeight: FontWeight.bold, fontSize: 10),
+                  style: const TextStyle(
+                    color: M3Tokens.onPrimaryContainer,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 10,
+                  ),
                 ),
               ),
               if (p['topic_name'] != null)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.grey.shade100,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     p['topic_name'],
-                    style: const TextStyle(color: M3Tokens.onSurfaceVariant, fontWeight: FontWeight.w600, fontSize: 10),
+                    style: const TextStyle(
+                      color: M3Tokens.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 10,
+                    ),
                   ),
                 ),
             ],
@@ -570,14 +621,22 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
           // Title
           Text(
             p['title'] ?? '',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: M3Tokens.onSurface),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: M3Tokens.onSurface,
+            ),
           ),
           const SizedBox(height: 10),
 
           // Body
           Text(
             p['body'] ?? '',
-            style: const TextStyle(fontSize: 14, height: 1.5, color: M3Tokens.onSurface),
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: M3Tokens.onSurface,
+            ),
           ),
           const SizedBox(height: 16),
           const Divider(height: 1),
@@ -591,7 +650,10 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                 children: [
                   CircleAvatar(
                     radius: 14,
-                    backgroundColor: isAnonymous ? Colors.purple.shade100 : M3Tokens.primaryContainer,
+                    backgroundColor:
+                        isAnonymous
+                            ? Colors.purple.shade100
+                            : M3Tokens.primaryContainer,
                     child: Icon(
                       isAnonymous ? Icons.masks_outlined : Icons.person_outline,
                       size: 16,
@@ -601,19 +663,31 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                   const SizedBox(width: 8),
                   Text(
                     p['author_display_name'] ?? 'Peer',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
 
               OutlinedButton.icon(
                 onPressed: _togglePostHelpful,
-                icon: Icon(hasMarked ? Icons.thumb_up : Icons.thumb_up_outlined, size: 14),
-                label: Text('Helpful (${p['helpful_count'] ?? 0})', style: const TextStyle(fontSize: 12)),
+                icon: Icon(
+                  hasMarked ? Icons.thumb_up : Icons.thumb_up_outlined,
+                  size: 14,
+                ),
+                label: Text(
+                  'Helpful (${p['helpful_count'] ?? 0})',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 style: OutlinedButton.styleFrom(
                   backgroundColor: hasMarked ? M3Tokens.primaryContainer : null,
                   foregroundColor: hasMarked ? M3Tokens.primary : null,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
@@ -629,7 +703,8 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
     final isSolution = r['is_solution'] == true;
     final isEndorsed = r['is_teacher_endorsed'] == true;
     final hasMarked = r['user_has_marked_helpful'] == true;
-    final canDeleteReply = r['author_id'] == AuthService.currentUser?.id ||
+    final canDeleteReply =
+        r['author_id'] == AuthService.currentUser?.id ||
         AuthService.currentUser?.role == 'teacher';
 
     return Container(
@@ -638,7 +713,9 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
       decoration: BoxDecoration(
         color: isSolution ? Colors.green.shade50 : Colors.white,
         borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
-        border: Border.all(color: isSolution ? Colors.green : M3Tokens.outlineVariant),
+        border: Border.all(
+          color: isSolution ? Colors.green : M3Tokens.outlineVariant,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -650,7 +727,10 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                 if (isSolution)
                   Container(
                     margin: const EdgeInsets.only(right: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.green,
                       borderRadius: BorderRadius.circular(4),
@@ -660,13 +740,23 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                       children: [
                         Icon(Icons.check, size: 12, color: Colors.white),
                         SizedBox(width: 2),
-                        Text('ACCEPTED SOLUTION', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 9)),
+                        Text(
+                          'ACCEPTED SOLUTION',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 9,
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 if (isEndorsed)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: M3Tokens.primary,
                       borderRadius: BorderRadius.circular(4),
@@ -676,7 +766,14 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                       children: [
                         Icon(Icons.verified, size: 12, color: Colors.white),
                         SizedBox(width: 2),
-                        Text('INSTRUCTOR ENDORSED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 9)),
+                        Text(
+                          'INSTRUCTOR ENDORSED',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 9,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -686,7 +783,11 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
 
           Text(
             r['body'] ?? '',
-            style: const TextStyle(fontSize: 13, height: 1.45, color: M3Tokens.onSurface),
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: M3Tokens.onSurface,
+            ),
           ),
           const SizedBox(height: 12),
           const Divider(height: 1),
@@ -697,7 +798,11 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
             children: [
               Text(
                 r['author_display_name'] ?? 'Peer',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: M3Tokens.onSurfaceVariant),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                  color: M3Tokens.onSurfaceVariant,
+                ),
               ),
 
               Row(
@@ -705,13 +810,20 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                   TextButton(
                     onPressed: () => _acceptSolution(r['id']),
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     child: Text(
                       isSolution ? 'Unmark Solution' : 'Accept Solution',
-                      style: TextStyle(color: isSolution ? Colors.green : M3Tokens.primary, fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        color: isSolution ? Colors.green : M3Tokens.primary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -722,7 +834,10 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                         Icon(
                           hasMarked ? Icons.thumb_up : Icons.thumb_up_outlined,
                           size: 14,
-                          color: hasMarked ? M3Tokens.primary : M3Tokens.onSurfaceVariant,
+                          color:
+                              hasMarked
+                                  ? M3Tokens.primary
+                                  : M3Tokens.onSurfaceVariant,
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -730,7 +845,10 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: hasMarked ? M3Tokens.primary : M3Tokens.onSurfaceVariant,
+                            color:
+                                hasMarked
+                                    ? M3Tokens.primary
+                                    : M3Tokens.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -794,9 +912,14 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                 ),
               ),
               IconButton(
-                icon: _isSubmittingReply
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.send, color: M3Tokens.primary),
+                icon:
+                    _isSubmittingReply
+                        ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : const Icon(Icons.send, color: M3Tokens.primary),
                 onPressed: _isSubmittingReply ? null : _submitReply,
               ),
             ],
@@ -807,7 +930,13 @@ class _DoubtDetailScreenState extends State<DoubtDetailScreen> {
                 value: _replyAnonymous,
                 onChanged: (val) => setState(() => _replyAnonymous = val),
               ),
-              const Text('Reply with Pseudonym', style: TextStyle(fontSize: 11, color: M3Tokens.onSurfaceVariant)),
+              const Text(
+                'Reply with Pseudonym',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: M3Tokens.onSurfaceVariant,
+                ),
+              ),
             ],
           ),
         ],

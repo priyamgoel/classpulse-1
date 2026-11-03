@@ -103,7 +103,9 @@ in production.
 | `SMTP_USER` | No | — | SMTP username. Also used as a fallback sender when `EMAIL_FROM` is unset. |
 | `SMTP_PASS` | No | — | SMTP password or app password. |
 | `SMTP_TLS_REJECT_UNAUTHORIZED` | No | `true` | Set to `false` only for a local SMTP server with a self-signed certificate. |
-| `AUTH_RATE_LIMIT_MAX` | No | `20` | Authentication requests allowed per 15-minute window. |
+| `AUTH_LOGIN_EMAIL_RATE_LIMIT_MAX` | No | `10` | Login attempts allowed per account (normalized email) per 15-minute window. |
+| `AUTH_LOGIN_IP_RATE_LIMIT_MAX` | No | `100` | Login requests allowed per client IP per 15-minute window (NAT-friendly backstop). |
+| `AUTH_SIGNUP_RATE_LIMIT_MAX` | No | `50` | Signup requests allowed per client IP per 15-minute window. |
 | `SEARCH_RATE_LIMIT_MAX` | No | `60` | Search requests allowed per 1-minute window. |
 
 ### CORS

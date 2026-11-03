@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   UNIQUE (session_id, student_id)
 );
 
+-- Teacher overrides are tagged so ACL metrics can exclude non-scan records.
+ALTER TABLE attendance_records
+  ADD COLUMN IF NOT EXISTS is_manual BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Seed predefined course catalog if empty (Spec requirement: course-code catalog)
 INSERT INTO courses (course_code, course_name)
 VALUES 

@@ -193,19 +193,34 @@ router.get('/mine', authenticateToken, async (req, res) => {
                 (SELECT COUNT(*)::int FROM pulsemeters p WHERE p.classroom_id = c.id) as pulsemeter_count,
                 (SELECT COUNT(*)::int FROM doubt_posts dp WHERE (dp.classroom_id = c.id OR (dp.course_id = c.course_id AND dp.audience_scope IN ('COURSE', 'APP'))) AND dp.status = 'OPEN') as open_doubts_count,
                 (SELECT COUNT(*)::int FROM doubt_posts dp WHERE (dp.classroom_id = c.id OR (dp.course_id = c.course_id AND dp.audience_scope IN ('COURSE', 'APP'))) AND dp.status = 'RESOLVED') as resolved_doubts_count,
-                COALESCE(
-                  ROUND(
-                    (
-                      SELECT AVG(
-                        CASE WHEN (SELECT COUNT(*) FROM enrollments e WHERE e.classroom_id = c.id) > 0
-                             THEN (SELECT COUNT(*)::numeric FROM attendance_records ar WHERE ar.session_id = s.id) / (SELECT COUNT(*)::numeric FROM enrollments e WHERE e.classroom_id = c.id) * 100
-                             ELSE 0
-                        END
-                      )
-                      FROM sessions s
-                      WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL
-                    ), 1
-                  ), 0
+                ROUND(
+                  (
+                    SELECT AVG(
+                      CASE
+                        WHEN (
+                          SELECT COUNT(*) FROM enrollments e
+                          WHERE e.classroom_id = c.id
+                            AND e.joined_at <= s.started_at
+                        ) > 0
+                        THEN (
+                          SELECT COUNT(*)::numeric
+                          FROM attendance_records ar
+                          JOIN enrollments e
+                            ON e.classroom_id = c.id
+                           AND e.student_id = ar.student_id
+                           AND e.joined_at <= s.started_at
+                          WHERE ar.session_id = s.id
+                        ) / (
+                          SELECT COUNT(*)::numeric FROM enrollments e
+                          WHERE e.classroom_id = c.id
+                            AND e.joined_at <= s.started_at
+                        ) * 100
+                        ELSE NULL
+                      END
+                    )
+                    FROM sessions s
+                    WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL
+                  ), 1
                 )::float as attendance_avg_rate
          FROM classrooms c
          JOIN courses co ON c.course_id = co.id
@@ -226,7 +241,7 @@ router.get('/mine', authenticateToken, async (req, res) => {
                   ROUND(
                     (
                       CASE WHEN (SELECT COUNT(*) FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL AND s.started_at >= en.joined_at) > 0
-                           THEN (SELECT COUNT(*)::numeric FROM attendance_records ar JOIN sessions s ON ar.session_id = s.id WHERE s.classroom_id = c.id AND ar.student_id = $1 AND s.started_at >= en.joined_at) / (SELECT COUNT(*)::numeric FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL AND s.started_at >= en.joined_at) * 100
+                           THEN (SELECT COUNT(*)::numeric FROM attendance_records ar JOIN sessions s ON ar.session_id = s.id WHERE s.classroom_id = c.id AND ar.student_id = $1 AND s.started_at >= en.joined_at AND s.ended_at IS NOT NULL) / (SELECT COUNT(*)::numeric FROM sessions s WHERE s.classroom_id = c.id AND s.ended_at IS NOT NULL AND s.started_at >= en.joined_at) * 100
                            ELSE 0
                       END
                     ), 1
@@ -286,19 +301,34 @@ router.get('/:id/summary', authenticateToken, async (req, res) => {
     // Attendance stats
     const attendanceStats = await db.query(
       `SELECT COUNT(*)::int as total_sessions,
-              COALESCE(
-                ROUND(
-                  AVG(
-                    CASE WHEN $2 > 0
-                         THEN (SELECT COUNT(*)::numeric FROM attendance_records ar WHERE ar.session_id = s.id) / $2 * 100
-                         ELSE 0
-                    END
-                  ), 1
-                ), 0
+              ROUND(
+                AVG(
+                  CASE
+                    WHEN (
+                      SELECT COUNT(*) FROM enrollments e
+                      WHERE e.classroom_id = s.classroom_id
+                        AND e.joined_at <= s.started_at
+                    ) > 0
+                    THEN (
+                      SELECT COUNT(*)::numeric
+                      FROM attendance_records ar
+                      JOIN enrollments e
+                        ON e.classroom_id = s.classroom_id
+                       AND e.student_id = ar.student_id
+                       AND e.joined_at <= s.started_at
+                      WHERE ar.session_id = s.id
+                    ) / (
+                      SELECT COUNT(*)::numeric FROM enrollments e
+                      WHERE e.classroom_id = s.classroom_id
+                        AND e.joined_at <= s.started_at
+                    ) * 100
+                    ELSE NULL
+                  END
+                ), 1
               )::float as avg_turnout_pct
        FROM sessions s
        WHERE s.classroom_id = $1 AND s.ended_at IS NOT NULL`,
-      [classroomId, classroom.student_count]
+      [classroomId]
     );
 
     // Engagement stats (PulseMeters, Quizzes, Active Activity)
@@ -319,9 +349,9 @@ router.get('/:id/summary', authenticateToken, async (req, res) => {
 
     // Doubt Forum stats
     const doubtStats = await db.query(
-      `SELECT COUNT(dp.id)::int as total_doubts,
-              COUNT(CASE WHEN dp.status = 'OPEN' THEN 1 END)::int as open_doubts,
-              COUNT(CASE WHEN dp.status = 'RESOLVED' THEN 1 END)::int as resolved_doubts,
+      `SELECT COUNT(DISTINCT dp.id)::int as total_doubts,
+              COUNT(DISTINCT CASE WHEN dp.status = 'OPEN' THEN dp.id END)::int as open_doubts,
+              COUNT(DISTINCT CASE WHEN dp.status = 'RESOLVED' THEN dp.id END)::int as resolved_doubts,
               COUNT(dr.id)::int as total_replies
        FROM doubt_posts dp
        LEFT JOIN doubt_replies dr ON dp.id = dr.doubt_post_id

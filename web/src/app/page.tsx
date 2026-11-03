@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -66,7 +66,7 @@ export interface Classroom {
   teacher_name: string;
   join_code: string;
   student_count: number;
-  attendance_avg_rate?: number;
+  attendance_avg_rate?: number | null;
   quiz_count?: number;
   pulsemeter_count?: number;
   open_doubts_count?: number;
@@ -79,9 +79,11 @@ export default function HomePage() {
   const [selectedClassroomId, setSelectedClassroomId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState(0);
   const [loadingClassrooms, setLoadingClassrooms] = useState(true);
+  const [classroomsError, setClassroomsError] = useState<string | null>(null);
   const [startingSession, setStartingSession] = useState(false);
-  const [endingSession, setEndingSession] = useState(false);
+  const [endingSessionId, setEndingSessionId] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [liveSessionWarning, setLiveSessionWarning] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Dialog & Modal States
@@ -89,29 +91,28 @@ export default function HomePage() {
   const [joinModalClassroom, setJoinModalClassroom] = useState<Classroom | null>(null);
   const [rosterDialogClassroom, setRosterDialogClassroom] = useState<Classroom | null>(null);
   const [deleteConfirmClassroom, setDeleteConfirmClassroom] = useState<Classroom | null>(null);
-  const [activeLiveSession, setActiveLiveSession] = useState<LiveSession | null>(null);
-  const [liveSessionModalOpen, setLiveSessionModalOpen] = useState(false);
-  const [sessionElapsed, setSessionElapsed] = useState('');
+  const [activeLiveSessions, setActiveLiveSessions] = useState<LiveSession[]>([]);
+  const [liveSessionModalSession, setLiveSessionModalSession] = useState<LiveSession | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const activeSessionSeqRef = useRef(0);
 
   const { user, loading, logout } = useAuth();
   const router = useRouter();
 
-  // Elapsed timer ticker for active attendance session
+  // Single ticker driving the elapsed time of every active session banner.
   useEffect(() => {
-    if (!activeLiveSession?.started_at) {
-      setSessionElapsed('');
-      return;
-    }
-    const update = () => {
-      const diff = Math.max(0, Math.floor((Date.now() - new Date(activeLiveSession.started_at).getTime()) / 1000));
-      const m = Math.floor(diff / 60);
-      const s = diff % 60;
-      setSessionElapsed(`${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-    };
-    update();
-    const interval = setInterval(update, 1000);
+    if (activeLiveSessions.length === 0) return;
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, [activeLiveSession]);
+  }, [activeLiveSessions.length]);
+
+  const formatElapsed = (startedAt: string) => {
+    const diff = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+    const m = Math.floor(diff / 60);
+    const s = diff % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -127,41 +128,72 @@ export default function HomePage() {
     }
   }, [user, loading, router]);
 
-  const checkActiveSession = async () => {
+  const checkActiveSession = useCallback(async () => {
     try {
       if (!getAuthToken()) return;
+      const seq = ++activeSessionSeqRef.current;
       const res = await apiFetch('/sessions/active-mine');
-      const data = await readJson<{ session?: LiveSession | null; sessions?: LiveSession[] }>(res);
+      const data = await readJson<{ session?: LiveSession | null; sessions?: LiveSession[]; error?: string }>(res);
+      if (seq !== activeSessionSeqRef.current) return;
       if (res.ok) {
         // New contract returns both `sessions` and a convenience `session`.
-        const session = data?.session || data?.sessions?.[0] || null;
-        setActiveLiveSession(session);
+        const sessions = data?.sessions || (data?.session ? [data.session] : []);
+        setActiveLiveSessions(sessions);
+        // Keep the open projector pointed at a session that still exists server-side.
+        setLiveSessionModalSession((current) => {
+          if (!current) return null;
+          return sessions.some((s) => s.id === current.id) ? current : null;
+        });
+        setLiveSessionWarning(null);
+      } else {
+        setLiveSessionWarning(data?.error || 'Could not check for active attendance sessions.');
       }
     } catch (err) {
       console.error('Error checking active session:', err);
+      setLiveSessionWarning('Network error checking for active attendance sessions.');
     }
-  };
+  }, []);
+
+  // Reconcile active-session banners with the server on focus and on a modest interval.
+  useEffect(() => {
+    if (!user || user.role !== 'teacher') return;
+    const reconcile = () => {
+      checkActiveSession();
+    };
+    window.addEventListener('focus', reconcile);
+    const interval = setInterval(reconcile, 45000);
+    return () => {
+      window.removeEventListener('focus', reconcile);
+      clearInterval(interval);
+    };
+  }, [user, checkActiveSession]);
 
   const fetchClassrooms = async () => {
     setLoadingClassrooms(true);
+    setClassroomsError(null);
     try {
       const response = await apiFetch('/classrooms/mine');
-      const data = await readJson<{ classrooms?: Classroom[] }>(response);
+      const data = await readJson<{ classrooms?: Classroom[]; error?: string }>(response);
       if (response.ok) {
         const fetched = data?.classrooms || [];
         setClassrooms(fetched);
         if (fetched.length > 0 && !selectedClassroomId) {
           setSelectedClassroomId(fetched[0].id);
         }
+      } else {
+        // Keep the previously loaded list so the page can show a non-blocking warning.
+        setClassroomsError(data?.error || 'Failed to load classrooms.');
       }
     } catch (err) {
       console.error('Error fetching classrooms:', err);
+      setClassroomsError('Network error loading classrooms.');
     } finally {
       setLoadingClassrooms(false);
     }
   };
 
   const handleStartSession = async (classroom: Classroom) => {
+    activeSessionSeqRef.current += 1;
     setStartingSession(true);
     setSessionError(null);
     try {
@@ -172,8 +204,14 @@ export default function HomePage() {
       });
       const data = await readJson<{ session?: LiveSession; error?: string }>(res);
       if (res.ok && data?.session) {
-        setActiveLiveSession(data.session);
-        setLiveSessionModalOpen(true);
+        // Invalidate any reconcile that started while the POST was in flight.
+        activeSessionSeqRef.current += 1;
+        const startedSession = data.session;
+        setActiveLiveSessions((prev) => [
+          ...prev.filter((s) => s.id !== startedSession.id),
+          startedSession,
+        ]);
+        setLiveSessionModalSession(startedSession);
       } else {
         setSessionError(data?.error || 'Failed to start session');
       }
@@ -184,15 +222,16 @@ export default function HomePage() {
     }
   };
 
-  const handleEndActiveSession = async () => {
-    if (!activeLiveSession) return;
-    setEndingSession(true);
+  const handleEndActiveSession = async (session: LiveSession) => {
+    activeSessionSeqRef.current += 1;
+    setEndingSessionId(session.id);
     setSessionError(null);
     try {
-      const res = await apiFetch(`/sessions/${activeLiveSession.id}/end`, { method: 'POST' });
+      const res = await apiFetch(`/sessions/${session.id}/end`, { method: 'POST' });
       if (res.ok) {
-        setActiveLiveSession(null);
-        setLiveSessionModalOpen(false);
+        activeSessionSeqRef.current += 1;
+        setActiveLiveSessions((prev) => prev.filter((s) => s.id !== session.id));
+        setLiveSessionModalSession((current) => (current?.id === session.id ? null : current));
         fetchClassrooms();
       } else {
         const data = await readJson<{ error?: string }>(res);
@@ -201,17 +240,24 @@ export default function HomePage() {
     } catch {
       setSessionError('Network error ending attendance session');
     } finally {
-      setEndingSession(false);
+      setEndingSessionId(null);
     }
   };
 
   const handleDeleteClassroom = async (classroom: Classroom) => {
+    activeSessionSeqRef.current += 1;
     setDeletingId(classroom.id);
     try {
       const res = await apiFetch(`/classrooms/${classroom.id}`, { method: 'DELETE' });
       if (res.ok) {
+        activeSessionSeqRef.current += 1;
         setDeleteConfirmClassroom(null);
         if (selectedClassroomId === classroom.id) setSelectedClassroomId(null);
+        // Sessions are cascade-deleted with the classroom; drop their banners immediately.
+        setActiveLiveSessions((prev) => prev.filter((s) => s.classroom_id !== classroom.id));
+        setLiveSessionModalSession((current) =>
+          current?.classroom_id === classroom.id ? null : current
+        );
         fetchClassrooms();
       } else {
         const data = await readJson<{ error?: string }>(res);
@@ -243,84 +289,120 @@ export default function HomePage() {
 
   return (
     <AppShell activeTab={mainNavTab} onTabChange={setMainNavTab}>
-      {/* Session Active Persistent Notification Banner */}
-      {activeLiveSession && !liveSessionModalOpen && (
-        <Paper
-          elevation={2}
+      {/* Session Active Persistent Notification Banners (one per active session) */}
+      {activeLiveSessions.filter((s) => s.id !== liveSessionModalSession?.id).length > 0 && (
+        <Box
           sx={{
             mb: 3,
-            p: 2,
-            borderRadius: '12px',
-            border: '2px solid #F59E0B',
-            bgcolor: '#FFFBEB',
             position: 'sticky',
             top: 72,
             zIndex: 10,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
           }}
         >
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            justifyContent="space-between"
-            alignItems={{ xs: 'flex-start', sm: 'center' }}
-            spacing={2}
-          >
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <Box
+          {activeLiveSessions
+            .filter((s) => s.id !== liveSessionModalSession?.id)
+            .map((session) => (
+              <Paper
+                key={session.id}
+                elevation={2}
                 sx={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  bgcolor: '#EF4444',
-                  boxShadow: '0 0 0 0 rgba(239, 68, 68, 0.7)',
-                  animation: 'pulse 1.5s infinite',
-                  '@keyframes pulse': {
-                    '0%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(239, 68, 68, 0.7)' },
-                    '70%': { transform: 'scale(1)', boxShadow: '0 0 0 8px rgba(239, 68, 68, 0)' },
-                    '100%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(239, 68, 68, 0)' },
-                  },
+                  p: 2,
+                  borderRadius: '12px',
+                  border: '2px solid #F59E0B',
+                  bgcolor: '#FFFBEB',
                 }}
-              />
-              <Box>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#92400E' }}>
-                    ATTENDANCE SESSION ACTIVE
-                  </Typography>
-                  {sessionElapsed && (
-                    <Chip
-                      size="small"
-                      label={`Running for ${sessionElapsed}`}
-                      sx={{ bgcolor: '#FEF3C7', color: '#92400E', fontWeight: 700, fontSize: '0.75rem' }}
+              >
+                <Stack
+                  direction={{ xs: 'column', sm: 'row' }}
+                  justifyContent="space-between"
+                  alignItems={{ xs: 'flex-start', sm: 'center' }}
+                  spacing={2}
+                >
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        bgcolor: '#EF4444',
+                        boxShadow: '0 0 0 0 rgba(239, 68, 68, 0.7)',
+                        animation: 'pulse 1.5s infinite',
+                        '@keyframes pulse': {
+                          '0%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(239, 68, 68, 0.7)' },
+                          '70%': { transform: 'scale(1)', boxShadow: '0 0 0 8px rgba(239, 68, 68, 0)' },
+                          '100%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(239, 68, 68, 0)' },
+                        },
+                      }}
                     />
-                  )}
-                </Stack>
-                <Typography variant="body2" sx={{ color: '#78350F', mt: 0.25 }}>
-                  <strong>{activeLiveSession.course_code}: {activeLiveSession.course_name}</strong> ({activeLiveSession.section_name}) is accepting QR scans in background.
-                </Typography>
-              </Box>
-            </Stack>
+                    <Box>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#92400E' }}>
+                          ATTENDANCE SESSION ACTIVE
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={`Running for ${formatElapsed(session.started_at)}`}
+                          sx={{ bgcolor: '#FEF3C7', color: '#92400E', fontWeight: 700, fontSize: '0.75rem' }}
+                        />
+                      </Stack>
+                      <Typography variant="body2" sx={{ color: '#78350F', mt: 0.25 }}>
+                        <strong>{session.course_code}: {session.course_name}</strong> ({session.section_name}) attendance session is active. QR scanning is paused while the projector is minimized — reopen to resume.
+                      </Typography>
+                    </Box>
+                  </Stack>
 
-            <Stack direction="row" spacing={1.5} sx={{ alignSelf: { xs: 'stretch', sm: 'auto' } }}>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => setLiveSessionModalOpen(true)}
-                sx={{ borderColor: '#D97706', color: '#92400E', fontWeight: 700 }}
-              >
-                Re-open Projector
-              </Button>
-              <Button
-                size="small"
-                variant="contained"
-                color="error"
-                onClick={handleEndActiveSession}
-                disabled={endingSession}
-                sx={{ fontWeight: 700 }}
-              >
-                {endingSession ? 'Ending...' : 'End Attendance Session'}
-              </Button>
-            </Stack>
-          </Stack>
-        </Paper>
+                  <Stack direction="row" spacing={1.5} sx={{ alignSelf: { xs: 'stretch', sm: 'auto' } }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setLiveSessionModalSession(session)}
+                      sx={{ borderColor: '#D97706', color: '#92400E', fontWeight: 700 }}
+                    >
+                      Re-open Projector
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="error"
+                      onClick={() => handleEndActiveSession(session)}
+                      disabled={endingSessionId === session.id}
+                      sx={{ fontWeight: 700 }}
+                    >
+                      {endingSessionId === session.id ? 'Ending...' : 'End Attendance Session'}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))}
+        </Box>
+      )}
+
+      {liveSessionWarning && (
+        <Alert severity="warning" sx={{ mb: 3 }} onClose={() => setLiveSessionWarning(null)}>
+          {liveSessionWarning} Active attendance session banners may be out of date.
+        </Alert>
+      )}
+
+      {classroomsError && classrooms.length === 0 && (
+        <Alert
+          severity="error"
+          sx={{ mb: 3 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={fetchClassrooms}
+              disabled={loadingClassrooms}
+            >
+              {loadingClassrooms ? 'Retrying...' : 'Retry'}
+            </Button>
+          }
+        >
+          {classroomsError}
+        </Alert>
       )}
 
       {sessionError && (
@@ -354,91 +436,114 @@ export default function HomePage() {
               </Button>
             </Stack>
 
-            {loadingClassrooms ? (
+            {loadingClassrooms && classrooms.length === 0 ? (
               <Box sx={{ py: 4, textAlign: 'center' }}>
                 <CircularProgress size={32} />
               </Box>
             ) : classrooms.length === 0 ? (
-              <EmptyState
-                title="No Classrooms Created Yet"
-                description="Create your first lecture or lab section to generate student join codes."
-                actionLabel="Create Classroom"
-                onAction={() => setCreateDialogOpen(true)}
-              />
+              classroomsError ? null : (
+                <EmptyState
+                  title="No Classrooms Created Yet"
+                  description="Create your first lecture or lab section to generate student join codes."
+                  actionLabel="Create Classroom"
+                  onAction={() => setCreateDialogOpen(true)}
+                />
+              )
             ) : (
-              <Grid container spacing={3}>
-                {classrooms.map((classroom) => (
-                  <Grid item xs={12} md={6} key={classroom.id}>
-                    <Box sx={{ position: 'relative' }}>
-                      <ClassroomCard
-                        id={classroom.id}
-                        courseCode={classroom.course_code}
-                        courseName={classroom.course_name}
-                        sectionName={classroom.section_name}
-                        teacherName={classroom.teacher_name || user.full_name}
-                        studentCount={classroom.student_count}
-                        joinCode={classroom.join_code}
-                        selected={selectedClassroomId === classroom.id}
-                        attendanceAvgRate={classroom.attendance_avg_rate}
-                        quizCount={classroom.quiz_count}
-                        pulsemeterCount={classroom.pulsemeter_count}
-                        openDoubtsCount={classroom.open_doubts_count}
-                        onSelect={(id) => setSelectedClassroomId(id)}
-                      />
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
+              <>
+                {classroomsError && (
+                  <Alert
+                    severity="warning"
+                    sx={{ mb: 2 }}
+                    onClose={() => setClassroomsError(null)}
+                    action={
+                      <Button
+                        color="inherit"
+                        size="small"
+                        onClick={fetchClassrooms}
+                        disabled={loadingClassrooms}
                       >
-                        <Tooltip title="View Join Credentials & QR">
-                          <IconButton
-                            size="small"
-                            sx={{
-                              bgcolor: m3Tokens.color.surfaceVariant,
-                              '&:hover': { bgcolor: m3Tokens.color.outlineVariant },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setJoinModalClassroom(classroom);
-                            }}
-                          >
-                            <QrCodeIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="View Student Roster">
-                          <IconButton
-                            size="small"
-                            sx={{
-                              bgcolor: m3Tokens.color.surfaceVariant,
-                              '&:hover': { bgcolor: m3Tokens.color.outlineVariant },
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRosterDialogClassroom(classroom);
-                            }}
-                          >
-                            <PeopleIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <IconButton
-                          size="small"
-                          aria-label="Delete classroom"
-                          sx={{
-                            bgcolor: '#FEE2E2',
-                            '&:hover': { bgcolor: '#FECACA' },
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmClassroom(classroom);
-                          }}
+                        Retry
+                      </Button>
+                    }
+                  >
+                    {classroomsError} Showing the last loaded classrooms.
+                  </Alert>
+                )}
+                <Grid container spacing={3}>
+                  {classrooms.map((classroom) => (
+                    <Grid item xs={12} md={6} key={classroom.id}>
+                      <Box sx={{ position: 'relative' }}>
+                        <ClassroomCard
+                          id={classroom.id}
+                          courseCode={classroom.course_code}
+                          courseName={classroom.course_name}
+                          sectionName={classroom.section_name}
+                          teacherName={classroom.teacher_name || user.full_name}
+                          studentCount={classroom.student_count}
+                          joinCode={classroom.join_code}
+                          selected={selectedClassroomId === classroom.id}
+                          attendanceAvgRate={classroom.attendance_avg_rate}
+                          quizCount={classroom.quiz_count}
+                          pulsemeterCount={classroom.pulsemeter_count}
+                          openDoubtsCount={classroom.open_doubts_count}
+                          onSelect={(id) => setSelectedClassroomId(id)}
+                        />
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          sx={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}
                         >
-                          <DeleteIcon fontSize="small" sx={{ color: '#DC2626' }} />
-                        </IconButton>
-                      </Stack>
-                    </Box>
-                  </Grid>
-                ))}
-              </Grid>
+                          <Tooltip title="View Join Credentials & QR">
+                            <IconButton
+                              size="small"
+                              sx={{
+                                bgcolor: m3Tokens.color.surfaceVariant,
+                                '&:hover': { bgcolor: m3Tokens.color.outlineVariant },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setJoinModalClassroom(classroom);
+                              }}
+                            >
+                              <QrCodeIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="View Student Roster">
+                            <IconButton
+                              size="small"
+                              sx={{
+                                bgcolor: m3Tokens.color.surfaceVariant,
+                                '&:hover': { bgcolor: m3Tokens.color.outlineVariant },
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRosterDialogClassroom(classroom);
+                              }}
+                            >
+                              <PeopleIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <IconButton
+                            size="small"
+                            aria-label="Delete classroom"
+                            sx={{
+                              bgcolor: '#FEE2E2',
+                              '&:hover': { bgcolor: '#FECACA' },
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmClassroom(classroom);
+                            }}
+                          >
+                            <DeleteIcon fontSize="small" sx={{ color: '#DC2626' }} />
+                          </IconButton>
+                        </Stack>
+                      </Box>
+                    </Grid>
+                  ))}
+                </Grid>
+              </>
             )}
           </Box>
 
@@ -595,20 +700,22 @@ export default function HomePage() {
             )}
           </Stack>
 
-          {loadingClassrooms ? (
+          {loadingClassrooms && classrooms.length === 0 ? (
             <Box sx={{ py: 6, textAlign: 'center' }}>
               <CircularProgress />
             </Box>
           ) : classrooms.length === 0 ? (
-            <EmptyState
-              title="No Classrooms Available"
-              description="Create a classroom first to start recording and viewing attendance analytics."
-              actionLabel="Create Classroom"
-              onAction={() => {
-                setMainNavTab(0);
-                setCreateDialogOpen(true);
-              }}
-            />
+            classroomsError ? null : (
+              <EmptyState
+                title="No Classrooms Available"
+                description="Create a classroom first to start recording and viewing attendance analytics."
+                actionLabel="Create Classroom"
+                onAction={() => {
+                  setMainNavTab(0);
+                  setCreateDialogOpen(true);
+                }}
+              />
+            )
           ) : selectedClassroom ? (
             <AttendanceAnalyticsView classroomId={selectedClassroom.id} />
           ) : null}
@@ -649,20 +756,22 @@ export default function HomePage() {
             )}
           </Stack>
 
-          {loadingClassrooms ? (
+          {loadingClassrooms && classrooms.length === 0 ? (
             <Box sx={{ py: 6, textAlign: 'center' }}>
               <CircularProgress />
             </Box>
           ) : classrooms.length === 0 ? (
-            <EmptyState
-              title="No Classrooms Available"
-              description="Create a classroom section first to author PulseMeters."
-              actionLabel="Create Classroom"
-              onAction={() => {
-                setMainNavTab(0);
-                setCreateDialogOpen(true);
-              }}
-            />
+            classroomsError ? null : (
+              <EmptyState
+                title="No Classrooms Available"
+                description="Create a classroom section first to author PulseMeters."
+                actionLabel="Create Classroom"
+                onAction={() => {
+                  setMainNavTab(0);
+                  setCreateDialogOpen(true);
+                }}
+              />
+            )
           ) : selectedClassroom ? (
             <PulseMeterAuthoringView classroomId={selectedClassroom.id} />
           ) : null}
@@ -703,20 +812,22 @@ export default function HomePage() {
             )}
           </Stack>
 
-          {loadingClassrooms ? (
+          {loadingClassrooms && classrooms.length === 0 ? (
             <Box sx={{ py: 6, textAlign: 'center' }}>
               <CircularProgress />
             </Box>
           ) : classrooms.length === 0 ? (
-            <EmptyState
-              title="No Classrooms Available"
-              description="Create a classroom section first to author and manage live quizzes."
-              actionLabel="Create Classroom"
-              onAction={() => {
-                setMainNavTab(0);
-                setCreateDialogOpen(true);
-              }}
-            />
+            classroomsError ? null : (
+              <EmptyState
+                title="No Classrooms Available"
+                description="Create a classroom section first to author and manage live quizzes."
+                actionLabel="Create Classroom"
+                onAction={() => {
+                  setMainNavTab(0);
+                  setCreateDialogOpen(true);
+                }}
+              />
+            )
           ) : selectedClassroom ? (
             <QuizAuthoringView classroomId={selectedClassroom.id} />
           ) : null}
@@ -757,20 +868,22 @@ export default function HomePage() {
             )}
           </Stack>
 
-          {loadingClassrooms ? (
+          {loadingClassrooms && classrooms.length === 0 ? (
             <Box sx={{ py: 6, textAlign: 'center' }}>
               <CircularProgress />
             </Box>
           ) : classrooms.length === 0 ? (
-            <EmptyState
-              title="No Courses Available"
-              description="Create a classroom or course first to participate in the doubt forum."
-              actionLabel="Create Classroom"
-              onAction={() => {
-                setMainNavTab(0);
-                setCreateDialogOpen(true);
-              }}
-            />
+            classroomsError ? null : (
+              <EmptyState
+                title="No Courses Available"
+                description="Create a classroom or course first to participate in the doubt forum."
+                actionLabel="Create Classroom"
+                onAction={() => {
+                  setMainNavTab(0);
+                  setCreateDialogOpen(true);
+                }}
+              />
+            )
           ) : selectedClassroom ? (
             <DoubtForumView
               courseId={selectedClassroom.course_id}
@@ -858,12 +971,15 @@ export default function HomePage() {
         onRosterUpdated={fetchClassrooms}
       />
       <LiveSessionModal
-        open={liveSessionModalOpen}
-        session={activeLiveSession}
-        onClose={() => setLiveSessionModalOpen(false)}
+        open={Boolean(liveSessionModalSession)}
+        session={liveSessionModalSession}
+        onClose={() => setLiveSessionModalSession(null)}
         onSessionEnded={() => {
-          setActiveLiveSession(null);
-          setLiveSessionModalOpen(false);
+          const endedSession = liveSessionModalSession;
+          if (endedSession) {
+            setActiveLiveSessions((prev) => prev.filter((s) => s.id !== endedSession.id));
+          }
+          setLiveSessionModalSession(null);
           fetchClassrooms();
         }}
       />

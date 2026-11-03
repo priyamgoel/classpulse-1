@@ -22,11 +22,13 @@ async function getAttendanceMatrixData(classroomId) {
 
   const classroom = classRes.rows[0];
 
-  // 2. All conducted sessions in chronological order
+  // 2. All completed sessions in chronological order. The session currently in
+  // progress is excluded until it ends so it cannot affect the matrix or
+  // denominators.
   const sessionsRes = await db.query(
     `SELECT id, started_at, ended_at
      FROM sessions
-     WHERE classroom_id = $1
+     WHERE classroom_id = $1 AND ended_at IS NOT NULL
      ORDER BY started_at ASC`,
     [classroomId]
   );
@@ -46,7 +48,7 @@ async function getAttendanceMatrixData(classroomId) {
   // 4. All attendance records for this classroom
   const recordsRes = await db.query(
     `SELECT ar.session_id, ar.student_id, ar.status, ar.validated_at,
-            EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at))::int as acl_ms
+            GREATEST(0, ROUND(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000))::int as acl_ms
      FROM attendance_records ar
      JOIN sessions s ON ar.session_id = s.id
      WHERE s.classroom_id = $1`,
@@ -59,11 +61,18 @@ async function getAttendanceMatrixData(classroomId) {
     attendanceMap.set(`${rec.session_id}_${rec.student_id}`, rec);
   });
 
-  // 5. Build matrix rows
-  const totalSessions = sessions.length;
+  // 5. Build matrix rows. Sessions held before a student enrolled are not part
+  // of their record: they are marked N/A and excluded from their denominator.
   const rows = students.map((student, idx) => {
+    const joinedAt = new Date(student.joined_at).getTime();
     let attendedCount = 0;
+    let eligibleSessions = 0;
+
     const sessionStatuses = sessions.map((session) => {
+      if (new Date(session.started_at).getTime() < joinedAt) {
+        return 'N/A';
+      }
+      eligibleSessions++;
       const rec = attendanceMap.get(`${session.id}_${student.student_id}`);
       if (rec && rec.status === 'PRESENT') {
         attendedCount++;
@@ -72,11 +81,15 @@ async function getAttendanceMatrixData(classroomId) {
       return 'A';
     });
 
-    const percentage = totalSessions > 0
-      ? Math.round((attendedCount / totalSessions) * 1000) / 10
-      : 100.0;
+    const percentage = eligibleSessions > 0
+      ? Math.round((attendedCount / eligibleSessions) * 1000) / 10
+      : null;
 
-    const status = percentage >= 75 ? 'Eligible' : 'Shortage Warning';
+    const status = percentage === null
+      ? 'No sessions since joining'
+      : percentage >= 75
+        ? 'Eligible'
+        : 'Shortage Warning';
 
     return {
       srNo: idx + 1,
@@ -85,7 +98,7 @@ async function getAttendanceMatrixData(classroomId) {
       email: student.email,
       sessionStatuses,
       attendedCount,
-      totalSessions,
+      totalSessions: eligibleSessions,
       percentage,
       status,
     };
@@ -131,6 +144,7 @@ async function generateCsv(classroomId) {
   lines.push(`Section,${escapeCsv(data.classroom.section_name)}`);
   lines.push(`Instructor,${escapeCsv(data.classroom.teacher_name)}`);
   lines.push(`Exported At,${escapeCsv(new Date().toISOString())}`);
+  lines.push(`Note,${escapeCsv('Excludes the session currently in progress')}`);
   lines.push(''); // blank separator
 
   // Table Column Headers
@@ -152,7 +166,7 @@ async function generateCsv(classroomId) {
       ...row.sessionStatuses,
       row.attendedCount,
       row.totalSessions,
-      `${row.percentage}%`,
+      row.percentage === null ? 'N/A' : `${row.percentage}%`,
       row.status,
     ];
     lines.push(rowValues.map(escapeCsv).join(','));
@@ -206,8 +220,11 @@ async function generateExcel(classroomId) {
   worksheet.getCell('E4').value = new Date().toLocaleDateString();
   worksheet.getCell('D4').font = { bold: true };
 
-  // Row 5 is empty spacer
+  // Row 5 is a spacer, with a note explaining live-session exclusion.
   worksheet.addRow([]);
+  worksheet.getCell('D5').value = 'Note:';
+  worksheet.getCell('E5').value = 'Excludes the session currently in progress';
+  worksheet.getCell('D5').font = { bold: true };
 
   // 2. Table Column Headers (Row 6)
   const headerCols = ['#', 'Student Name', 'Email'];
@@ -247,7 +264,7 @@ async function generateExcel(classroomId) {
       ...row.sessionStatuses,
       row.attendedCount,
       row.totalSessions,
-      `${row.percentage}%`,
+      row.percentage === null ? 'N/A' : `${row.percentage}%`,
       row.status,
     ];
 
@@ -278,12 +295,18 @@ async function generateExcel(classroomId) {
         } else if (cell.value === 'A') {
           cell.font = { name: 'Calibri', bold: true, color: { argb: 'FFB71C1C' } }; // Dark Red
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEBEE' } };
+        } else if (cell.value === 'N/A') {
+          cell.font = { name: 'Calibri', color: { argb: 'FF9E9E9E' } }; // Neutral grey
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
         }
       }
 
       // Status column highlight (Last column)
       if (colNumber === headerCols.length) {
-        if (row.percentage >= 75) {
+        if (row.percentage === null) {
+          cell.font = { name: 'Calibri', bold: true, color: { argb: 'FF9E9E9E' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+        } else if (row.percentage >= 75) {
           cell.font = { name: 'Calibri', bold: true, color: { argb: 'FF1B5E20' } };
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
         } else {

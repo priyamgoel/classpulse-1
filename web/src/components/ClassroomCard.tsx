@@ -14,7 +14,7 @@ export interface ClassroomCardProps {
   studentCount?: number;
   joinCode?: string;
   selected?: boolean;
-  attendanceAvgRate?: number;
+  attendanceAvgRate?: number | null;
   quizCount?: number;
   pulsemeterCount?: number;
   openDoubtsCount?: number;
@@ -36,7 +36,8 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
   openDoubtsCount = 0,
   onSelect,
 }) => {
-  const isHealthyAttendance = (attendanceAvgRate ?? 100) >= 75;
+  const hasAttendance = attendanceAvgRate != null;
+  const isHealthyAttendance = attendanceAvgRate != null && attendanceAvgRate >= 75;
 
   return (
     <Card
@@ -81,7 +82,7 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
 
         {/* Micro-Metrics Strip (Iteration 2 — Part 8) */}
         <Stack direction="row" spacing={1} sx={{ mt: 1.5, mb: 1.5, flexWrap: 'wrap', gap: 0.75 }}>
-          {attendanceAvgRate !== undefined && (
+          {hasAttendance ? (
             <Chip
               label={`${attendanceAvgRate}% Turnout`}
               size="small"
@@ -91,6 +92,17 @@ export const ClassroomCard: React.FC<ClassroomCardProps> = ({
                 backgroundColor: isHealthyAttendance ? '#E8F5E9' : '#FFF3E0',
                 color: isHealthyAttendance ? '#2E7D32' : '#E65100',
                 border: `1px solid ${isHealthyAttendance ? '#A5D6A7' : '#FFE082'}`,
+              }}
+            />
+          ) : (
+            <Chip
+              label="No sessions yet"
+              size="small"
+              sx={{
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                backgroundColor: m3Tokens.color.surfaceVariant,
+                color: m3Tokens.color.onSurfaceVariant,
               }}
             />
           )}

@@ -58,7 +58,7 @@ interface Attendee {
     email: string;
   };
   validated_at: string;
-  acl_ms?: number;
+  acl_ms?: number | null;
   status: string;
 }
 
@@ -75,6 +75,8 @@ interface QrToken {
 interface TokenBatch {
   batch_id: string;
   timestamp: number;
+  expires_in_seconds?: number;
+  fresh_for_ms?: number;
   tokens: QrToken[];
 }
 
@@ -86,6 +88,15 @@ interface LiveSessionModalProps {
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+
+// The backend reuses a token batch for at most 4s. Poll noticeably faster than
+// that so a batch is replaced before it can age out of its 10s validity
+// window, while still showing each batch long enough to scan all three frames.
+const TOKEN_REFRESH_INTERVAL_MS = 1500;
+
+// Each batch is valid for 10s on the server. Used only when the response omits
+// `fresh_for_ms`, so the projector can still detect a stale batch.
+const TOKEN_VALIDITY_FALLBACK_MS = 10_000;
 
 export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   open,
@@ -101,14 +112,44 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [rotationSpeedMs, setRotationSpeedMs] = useState<number>(800); // 800ms (Default), 300ms (Fast), 100ms (Ultra-Fast)
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
-  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
+  // True once the current token batch has outlived its server-reported
+  // freshness window without a successful refresh.
+  const [batchExpired, setBatchExpired] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const fetchIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const rosterIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const rotationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const batchFreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const tokenFetchSeqRef = useRef(0);
+  const tokenFetchInFlightRef = useRef(false);
+
+  // Stable batch identity: same-batch polls must not restart the rotation
+  // timer or re-render the QR stream.
+  const batchId = tokenBatch?.batch_id;
+  const tokenCount = tokenBatch?.tokens?.length ?? 0;
+
+  const clearFreshnessTimer = () => {
+    if (batchFreshTimeoutRef.current) {
+      clearTimeout(batchFreshTimeoutRef.current);
+      batchFreshTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleFreshnessExpiry = (freshForMs: number) => {
+    clearFreshnessTimer();
+    if (!Number.isFinite(freshForMs) || freshForMs <= 0) {
+      setBatchExpired(true);
+      return;
+    }
+    setBatchExpired(false);
+    batchFreshTimeoutRef.current = setTimeout(() => {
+      batchFreshTimeoutRef.current = null;
+      setBatchExpired(true);
+    }, freshForMs);
+  };
 
   // Live session elapsed timer
   useEffect(() => {
@@ -129,9 +170,15 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleRequestClose = () => {
-    setConfirmCloseOpen(true);
-  };
+  // Clear all QR state when the projector closes or the session changes so a
+  // previous session's code can never flash on screen.
+  useEffect(() => {
+    setTokenBatch(null);
+    setTokenError(null);
+    setBatchExpired(false);
+    setCurrentFrameIdx(0);
+    clearFreshnessTimer();
+  }, [open, session?.id]);
 
   // 1. Initialize Socket.io & Fetch Existing Roster
   useEffect(() => {
@@ -178,10 +225,11 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     fetchRoster(session.id);
     fetchActiveTokens(session.id);
 
-    // The server reuses each token batch for 8s, so poll at the same cadence.
+    // Poll faster than the server's 4s batch-reuse window so a displayed
+    // batch is always replaced well before its 10s freshness limit expires.
     fetchIntervalRef.current = setInterval(() => {
       fetchActiveTokens(session.id);
-    }, 8000);
+    }, TOKEN_REFRESH_INTERVAL_MS);
 
     // Roster fallback poll: keeps attendance moving even if the socket drops.
     rosterIntervalRef.current = setInterval(() => {
@@ -196,12 +244,18 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
       if (fetchIntervalRef.current) clearInterval(fetchIntervalRef.current);
       if (rosterIntervalRef.current) clearInterval(rosterIntervalRef.current);
       if (rotationIntervalRef.current) clearInterval(rotationIntervalRef.current);
+      clearFreshnessTimer();
+      // Invalidate any token request still in flight for this session.
+      tokenFetchSeqRef.current += 1;
+      tokenFetchInFlightRef.current = false;
     };
   }, [open, session]);
 
   // 2. Configurable Dynamic 3-QR frame rotation (800ms / 300ms / 100ms)
+  // Keyed on the batch identity rather than the object reference so polling
+  // the same cached batch does not restart the timer.
   useEffect(() => {
-    if (!open || !tokenBatch || tokenBatch.tokens.length === 0) return;
+    if (!open || !batchId || tokenCount === 0) return;
 
     if (rotationIntervalRef.current) clearInterval(rotationIntervalRef.current);
 
@@ -212,7 +266,12 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
     return () => {
       if (rotationIntervalRef.current) clearInterval(rotationIntervalRef.current);
     };
-  }, [open, tokenBatch, rotationSpeedMs]);
+  }, [open, batchId, tokenCount, rotationSpeedMs]);
+
+  // A genuinely new batch starts at frame 0 ("Frame 1 of 3").
+  useEffect(() => {
+    setCurrentFrameIdx(0);
+  }, [batchId]);
 
   const fetchRoster = async (sessionId: string) => {
     try {
@@ -238,19 +297,60 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   };
 
   const fetchActiveTokens = async (sessionId: string) => {
+    // Keep a single request in flight: overlapping polls could return out of
+    // order and put an older batch back on the projector.
+    if (tokenFetchInFlightRef.current) return;
+    tokenFetchInFlightRef.current = true;
+    const requestSeq = tokenFetchSeqRef.current;
     try {
       const res = await apiFetch(`/sessions/${sessionId}/active-tokens`);
       const data = await readJson<{ token_batch?: TokenBatch; error?: string }>(res);
+      // Ignore a response that belongs to a session that has since closed.
+      if (requestSeq !== tokenFetchSeqRef.current) return;
       if (res.ok && data?.token_batch) {
-        setTokenBatch(data.token_batch);
+        const nextBatch = data.token_batch;
+        // Server-reported remaining freshness; fall back to the batch
+        // timestamp + validity window when the field is absent.
+        const freshForMs = Math.max(
+          0,
+          Number(nextBatch.fresh_for_ms) ||
+            Number(nextBatch.timestamp) + TOKEN_VALIDITY_FALLBACK_MS - Date.now()
+        );
+        // Keep the existing object when the server reused the same batch so
+        // the rotation effect and QR render stay stable across polls.
+        setTokenBatch((prev) =>
+          prev?.batch_id === nextBatch.batch_id ? prev : nextBatch
+        );
         setTokenError(null);
+        scheduleFreshnessExpiry(freshForMs);
       } else {
         setTokenError(data?.error || 'Could not generate the QR code stream');
+        // A fatal response (ended, forbidden, or missing session) means no
+        // later poll can recover; drop the stale batch immediately.
+        if (res.status === 400 || res.status === 403 || res.status === 404) {
+          setTokenBatch(null);
+          clearFreshnessTimer();
+          setBatchExpired(true);
+        }
       }
     } catch (err) {
+      if (requestSeq !== tokenFetchSeqRef.current) return;
       console.error('Error fetching active tokens:', err);
       setTokenError('Network error while generating the QR code stream');
+    } finally {
+      if (requestSeq === tokenFetchSeqRef.current) {
+        tokenFetchInFlightRef.current = false;
+      }
     }
+  };
+
+  const handleRetryTokens = () => {
+    if (!session) return;
+    // A hung poll can leave the in-flight flag stuck; invalidate it so the
+    // visible Retry button actually starts a fresh request.
+    tokenFetchSeqRef.current += 1;
+    tokenFetchInFlightRef.current = false;
+    fetchActiveTokens(session.id);
   };
 
   const handleEndSession = async () => {
@@ -287,6 +387,12 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   const qrStringPayload = currentToken
     ? currentToken.qr_payload || JSON.stringify(currentToken)
     : '';
+  // A failed poll or an expired batch takes precedence over any cached QR so
+  // the teacher can always reach Retry.
+  const showTokenError = Boolean(tokenError) || batchExpired;
+  const tokenErrorMessage =
+    tokenError ||
+    'The QR code stream has expired. Click Retry to generate a fresh set of codes.';
 
   // -------------------------------------------------------------
   // Fullscreen Theater / Projector View (Maximized Top-to-Bottom QR + Side Panels)
@@ -444,7 +550,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                 </Typography>
               </Stack>
               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', fontSize: '0.7rem', lineHeight: 1.3 }}>
-                Tokens refresh every 8s. Stream flips frames at {rotationSpeedMs}ms for fast camera capture.
+                Token batches refresh automatically every 4-6s. Each QR frame stays valid for 10s. Stream flips frames at {rotationSpeedMs}ms for fast camera capture.
               </Typography>
             </Paper>
           </Box>
@@ -479,7 +585,19 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               boxSizing: 'border-box',
             }}
           >
-            {qrStringPayload ? (
+            {showTokenError ? (
+              <Box sx={{ textAlign: 'center', px: 4, maxWidth: 560 }}>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: 'error.main', mb: 1 }}>
+                  QR stream unavailable
+                </Typography>
+                <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2 }}>
+                  {tokenErrorMessage}
+                </Typography>
+                <Button variant="contained" onClick={handleRetryTokens}>
+                  Retry
+                </Button>
+              </Box>
+            ) : qrStringPayload ? (
               <QRCodeSVG
                 value={qrStringPayload}
                 size={850}
@@ -489,18 +607,6 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                 fgColor="#000000"
                 bgColor="#FFFFFF"
               />
-            ) : tokenError ? (
-              <Box sx={{ textAlign: 'center', px: 4, maxWidth: 560 }}>
-                <Typography variant="h6" sx={{ fontWeight: 800, color: 'error.main', mb: 1 }}>
-                  QR stream unavailable
-                </Typography>
-                <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 2 }}>
-                  {tokenError}
-                </Typography>
-                <Button variant="contained" onClick={() => fetchActiveTokens(session.id)}>
-                  Retry
-                </Button>
-              </Box>
             ) : (
               <CircularProgress size={80} />
             )}
@@ -635,7 +741,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                             <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, fontSize: '0.7rem' }}>
                               {attendee.student.email}
                             </Typography>
-                            {attendee.acl_ms !== undefined && (
+                            {attendee.acl_ms != null && (
                               <Chip
                                 icon={<FlashOnIcon sx={{ fontSize: '0.65rem !important' }} />}
                                 label={`${attendee.acl_ms}ms`}
@@ -668,7 +774,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
   // -------------------------------------------------------------
   return (
     <>
-      <Dialog open={open} onClose={handleRequestClose} maxWidth="lg" fullWidth>
+      <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
         <DialogTitle sx={{ p: 2.5, bgcolor: '#FFFFFF', borderBottom: `1px solid ${m3Tokens.color.outlineVariant}` }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Box>
@@ -708,7 +814,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
               >
                 Fullscreen Projector
               </Button>
-              <IconButton onClick={handleRequestClose} size="small" title="Close Projector">
+              <IconButton onClick={onClose} size="small" title="Minimize Projector">
                 <CloseIcon />
               </IconButton>
             </Stack>
@@ -771,7 +877,19 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                   mb: 1.5,
                 }}
               >
-                {qrStringPayload ? (
+                {showTokenError ? (
+                  <Box sx={{ textAlign: 'center', width: 300, height: 300, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'error.main' }}>
+                      QR stream unavailable
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                      {tokenErrorMessage}
+                    </Typography>
+                    <Button size="small" variant="contained" onClick={handleRetryTokens}>
+                      Retry
+                    </Button>
+                  </Box>
+                ) : qrStringPayload ? (
                   <QRCodeSVG
                     value={qrStringPayload}
                     size={300}
@@ -780,18 +898,6 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                     fgColor="#000000"
                     bgColor="#FFFFFF"
                   />
-                ) : tokenError ? (
-                  <Box sx={{ textAlign: 'center', width: 300, height: 300, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5 }}>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'error.main' }}>
-                      QR stream unavailable
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-                      {tokenError}
-                    </Typography>
-                    <Button size="small" variant="contained" onClick={() => fetchActiveTokens(session.id)}>
-                      Retry
-                    </Button>
-                  </Box>
                 ) : (
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 300, height: 300 }}>
                     <CircularProgress />
@@ -912,7 +1018,7 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
                               <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
                                 {attendee.student.email}
                               </Typography>
-                              {attendee.acl_ms !== undefined && (
+                              {attendee.acl_ms != null && (
                                 <Chip
                                   icon={<FlashOnIcon sx={{ fontSize: '0.75rem !important' }} />}
                                   label={`${attendee.acl_ms}ms`}
@@ -946,8 +1052,8 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
           </Typography>
         </Stack>
         <Stack direction="row" spacing={2}>
-          <Button onClick={handleRequestClose} variant="outlined">
-            Keep Running in Background
+          <Button onClick={onClose} variant="outlined">
+            Minimize
           </Button>
           <Button
             onClick={handleEndSession}
@@ -958,59 +1064,6 @@ export const LiveSessionModal: React.FC<LiveSessionModalProps> = ({
             {ending ? 'Ending Session...' : 'End Attendance Session'}
           </Button>
         </Stack>
-      </DialogActions>
-    </Dialog>
-
-    {/* Confirmation Dialog on Projector Close */}
-    <Dialog
-      open={confirmCloseOpen}
-      onClose={() => setConfirmCloseOpen(false)}
-      maxWidth="xs"
-      fullWidth
-    >
-      <DialogTitle sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
-        Keep Attendance Running?
-      </DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 1.5 }}>
-          Closing the projector does <strong>not</strong> end the attendance session. QR codes will continue cycling and students can still scan in the background.
-        </Typography>
-        <Typography variant="body2" sx={{ fontWeight: 600, color: m3Tokens.color.onSurface }}>
-          If attendance in the lecture hall is complete, please end the session now so attendance counts are finalized.
-        </Typography>
-      </DialogContent>
-      <DialogActions sx={{ p: 2.5, flexDirection: 'column', gap: 1 }}>
-        <Button
-          fullWidth
-          variant="contained"
-          color="error"
-          onClick={async () => {
-            setConfirmCloseOpen(false);
-            await handleEndSession();
-          }}
-          disabled={ending}
-          sx={{ fontWeight: 700 }}
-        >
-          {ending ? 'Ending...' : 'End Attendance Session Now'}
-        </Button>
-        <Button
-          fullWidth
-          variant="outlined"
-          onClick={() => {
-            setConfirmCloseOpen(false);
-            onClose();
-          }}
-        >
-          Keep Running in Background
-        </Button>
-        <Button
-          fullWidth
-          size="small"
-          color="inherit"
-          onClick={() => setConfirmCloseOpen(false)}
-        >
-          Cancel
-        </Button>
       </DialogActions>
     </Dialog>
   </>

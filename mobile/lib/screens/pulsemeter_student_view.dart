@@ -28,6 +28,8 @@ List<Map<String, dynamic>> _safeMapList(dynamic value) {
   return <Map<String, dynamic>>[];
 }
 
+String _asString(dynamic value) => value?.toString() ?? '';
+
 class PulseMeterStudentView extends StatefulWidget {
   final String? initialClassroomId;
   final LiveActivityMode mode;
@@ -54,7 +56,8 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
   String? _selectedClassroomId;
   bool _isLoading = true;
   bool _isChecking = false;
-  bool _isInFlight = false;
+  String? _inFlightClassroomId;
+  int _checkSeq = 0;
   Map<String, dynamic>? _activeActivity;
   String? _message;
   Timer? _pollTimer;
@@ -87,7 +90,9 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
     _loadClassrooms();
     // Auto-poll every 4 seconds to discover live activities launched by the teacher
     _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (mounted && _selectedClassroomId != null && !_isInFlight) {
+      if (mounted &&
+          _selectedClassroomId != null &&
+          _inFlightClassroomId != _selectedClassroomId) {
         _checkActiveActivity(_selectedClassroomId!, silent: true);
       }
     });
@@ -128,10 +133,12 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
     String classroomId, {
     bool silent = false,
   }) async {
-    // A single in-flight flag prevents silent polls from overlapping manual
-    // checks (and each other).
-    if (_isInFlight) return;
-    _isInFlight = true;
+    // Track in-flight checks per classroom so switching sections is not
+    // blocked by the previous section's request.
+    if (_inFlightClassroomId == classroomId) return;
+    _inFlightClassroomId = classroomId;
+    final requestedClassroomId = classroomId;
+    final requestSeq = ++_checkSeq;
 
     if (!silent) {
       setState(() {
@@ -154,7 +161,11 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
           )
           .timeout(const Duration(seconds: 10));
 
-      if (!mounted) return;
+      if (!mounted ||
+          requestedClassroomId != _selectedClassroomId ||
+          requestSeq != _checkSeq) {
+        return;
+      }
 
       if (response.statusCode == 200) {
         Map<String, dynamic> data;
@@ -192,31 +203,52 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
         }
       }
     } on TimeoutException {
-      if (!silent && mounted) {
+      if (!silent &&
+          mounted &&
+          requestedClassroomId == _selectedClassroomId &&
+          requestSeq == _checkSeq) {
         setState(() {
           _activeActivity = null;
           _message = 'The server did not respond. Please try again.';
         });
       }
     } catch (_) {
-      if (!silent && mounted) {
+      if (!silent &&
+          mounted &&
+          requestedClassroomId == _selectedClassroomId &&
+          requestSeq == _checkSeq) {
         setState(() {
           _activeActivity = null;
           _message = 'Network error checking live activity.';
         });
       }
     } finally {
-      _isInFlight = false;
-      if (!silent && mounted) {
-        setState(() => _isChecking = false);
+      if (_inFlightClassroomId == requestedClassroomId &&
+          requestSeq == _checkSeq) {
+        _inFlightClassroomId = null;
+        if (mounted &&
+            requestedClassroomId == _selectedClassroomId &&
+            _isChecking) {
+          setState(() => _isChecking = false);
+        }
       }
     }
   }
 
   void _joinLiveActivity() {
     if (_activeActivity == null) return;
+    final selectedClassroomId = _selectedClassroomId;
+    if (selectedClassroomId == null) return;
 
     final activity = _activeActivity!;
+    final activityClassroomId = _asString(activity['classroom_id']);
+    if (activityClassroomId != selectedClassroomId) {
+      // The card belongs to a different section (stale check response); do not
+      // navigate with mismatched IDs.
+      _checkActiveActivity(selectedClassroomId);
+      return;
+    }
+
     final isQuiz = activity['activity_type'] == 'QUIZ';
     final userResponse = _safeMapOrNull(activity['user_response']);
     final activityId = (activity['id'] ?? '').toString();
@@ -230,7 +262,7 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
               builder:
                   (_) => LiveQuizStudentScreen(
                     activityId: activityId,
-                    classroomId: _selectedClassroomId!,
+                    classroomId: selectedClassroomId,
                     title: (quiz['title'] ?? 'Live Quiz').toString(),
                     scoringMode: (quiz['scoring_mode'] ?? 'WIDE').toString(),
                     questions: _safeMapList(quiz['questions']),
@@ -258,7 +290,7 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
               builder:
                   (_) => LivePulseMeterScreen(
                     activityId: activityId,
-                    classroomId: _selectedClassroomId!,
+                    classroomId: selectedClassroomId,
                     title:
                         (pulsemeter['title'] ?? 'Live PulseMeter').toString(),
                     type: (pulsemeter['type'] ?? 'WORD_CLOUD').toString(),
@@ -357,6 +389,9 @@ class _PulseMeterStudentViewState extends State<PulseMeterStudentView> {
                   if (val != null) {
                     setState(() {
                       _selectedClassroomId = val;
+                      _activeActivity = null;
+                      _message = null;
+                      _isChecking = true;
                     });
                     _checkActiveActivity(val);
                   }

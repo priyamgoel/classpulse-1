@@ -2,7 +2,7 @@ const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildApp } = require('./helpers/app');
-const { setHandler, reset } = require('./helpers/mockDb');
+const { setHandler, reset, calls } = require('./helpers/mockDb');
 const { start, request } = require('./helpers/http');
 const { users, makeToken } = require('./helpers/token');
 
@@ -229,7 +229,11 @@ const classroomRow = {
   student_count: 30,
 };
 
-function summaryHandler({ enrolled }) {
+function summaryHandler({
+  enrolled,
+  attendance = { total_sessions: 2, avg_turnout_pct: 50 },
+  forum = { total_doubts: 0, open_doubts: 0, resolved_doubts: 0, total_replies: 0 },
+} = {}) {
   return async (sql) => {
     if (/select c\.\*, co\.course_code/i.test(sql)) {
       return { rows: [{ ...classroomRow }] };
@@ -237,15 +241,19 @@ function summaryHandler({ enrolled }) {
     if (/select 1 from enrollments/i.test(sql)) {
       return { rows: enrolled ? [{ '?column?': 1 }] : [] };
     }
-    if (/from sessions s/i.test(sql)) return { rows: [{ total_sessions: 2, avg_turnout_pct: 50 }] };
+    if (/from sessions s/i.test(sql)) return { rows: [attendance] };
     if (/from pulsemeters/i.test(sql)) return { rows: [{ count: 1 }] };
     if (/from quizzes/i.test(sql)) return { rows: [{ count: 1 }] };
     if (/from live_activities/i.test(sql)) return { rows: [] };
     if (/from doubt_posts dp/i.test(sql)) {
-      return { rows: [{ total_doubts: 0, open_doubts: 0, resolved_doubts: 0, total_replies: 0 }] };
+      return { rows: [forum] };
     }
     return { rows: [] };
   };
+}
+
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, ' ').trim();
 }
 
 test('a non-member cannot read a classroom summary', async () => {
@@ -279,4 +287,163 @@ test('the owning teacher can read the summary with the join code', async () => {
 
   assert.equal(res.status, 200);
   assert.equal(res.body.classroom.join_code, 'ABC234');
+});
+
+test('the student classroom card numerator only counts completed sessions', async () => {
+  setHandler(async (sql) => {
+    if (/attendance_avg_rate/i.test(sql)) {
+      return {
+        rows: [
+          {
+            id: CLASSROOM,
+            course_code: 'UCS503P',
+            course_name: 'SE Lab',
+            teacher_name: users.teacher.full_name,
+            student_count: 1,
+            quiz_count: 0,
+            pulsemeter_count: 0,
+            open_doubts_count: 0,
+            resolved_doubts_count: 0,
+            attendance_avg_rate: 100,
+            joined_at: new Date().toISOString(),
+          },
+        ],
+      };
+    }
+    return { rows: [] };
+  });
+
+  const res = await request(base, 'GET', '/classrooms/mine', {
+    token: makeToken(users.student),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.classrooms[0].attendance_avg_rate, 100);
+
+  const call = calls.find((c) => /attendance_avg_rate/i.test(c.sql));
+  assert.ok(call);
+  const sql = normalizeSql(call.sql);
+  const endedFilters = sql.match(/s\.ended_at IS NOT NULL/gi) || [];
+  assert.ok(
+    endedFilters.length >= 2,
+    'the CASE guard, numerator and denominator must exclude unended sessions'
+  );
+  assert.match(
+    sql,
+    /attendance_records ar JOIN sessions s ON ar\.session_id = s\.id[\s\S]*?s\.started_at >= en\.joined_at[\s\S]*?s\.ended_at IS NOT NULL/i,
+    'the numerator must only count attendance from completed sessions'
+  );
+  assert.match(
+    sql,
+    /FROM sessions s WHERE s\.classroom_id = c\.id AND s\.ended_at IS NOT NULL AND s\.started_at >= en\.joined_at/i,
+    'the denominator already only counts completed sessions'
+  );
+  assert.match(sql, /ELSE 0/i);
+});
+
+test('teacher classroom cards average turnout over the session-time roster', async () => {
+  setHandler(async (sql) => {
+    if (/attendance_avg_rate/i.test(sql)) {
+      return { rows: [{ id: CLASSROOM, attendance_avg_rate: 100 }] };
+    }
+    return { rows: [] };
+  });
+
+  const res = await request(base, 'GET', '/classrooms/mine', {
+    token: makeToken(users.teacher),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.classrooms[0].attendance_avg_rate, 100);
+
+  const call = calls.find((c) => /attendance_avg_rate/i.test(c.sql));
+  assert.ok(call);
+  const sql = normalizeSql(call.sql);
+  assert.match(sql, /e\.joined_at <= s\.started_at/i);
+  assert.match(sql, /e\.student_id = ar\.student_id/i);
+  assert.match(sql, /s\.ended_at IS NOT NULL/i);
+  assert.doesNotMatch(sql, /COALESCE\s*\(/i);
+});
+
+test('a classroom with no completed sessions returns a null attendance rate', async () => {
+  setHandler(async (sql) => {
+    if (/attendance_avg_rate/i.test(sql)) {
+      return { rows: [{ id: CLASSROOM, attendance_avg_rate: null }] };
+    }
+    return { rows: [] };
+  });
+
+  const res = await request(base, 'GET', '/classrooms/mine', {
+    token: makeToken(users.teacher),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.classrooms[0].attendance_avg_rate, null);
+});
+
+test('the summary averages turnout over the session-time roster', async () => {
+  setHandler(summaryHandler({ enrolled: true }));
+
+  const res = await request(base, 'GET', `/classrooms/${CLASSROOM}/summary`, {
+    token: makeToken(users.student),
+  });
+  assert.equal(res.status, 200);
+
+  const call = calls.find((c) => /avg_turnout_pct/i.test(c.sql));
+  assert.ok(call);
+  const sql = normalizeSql(call.sql);
+  assert.match(sql, /e\.joined_at <= s\.started_at/i);
+  assert.match(sql, /e\.student_id = ar\.student_id/i);
+  assert.match(sql, /s\.ended_at IS NOT NULL/i);
+  assert.doesNotMatch(sql, /\$2/);
+  assert.deepEqual(call.params, [CLASSROOM]);
+  assert.equal(res.body.attendance.avg_turnout_pct, 50);
+});
+
+test('the summary reports null turnout when no session has completed', async () => {
+  setHandler(
+    summaryHandler({
+      enrolled: true,
+      attendance: { total_sessions: 0, avg_turnout_pct: null },
+    })
+  );
+
+  const res = await request(base, 'GET', `/classrooms/${CLASSROOM}/summary`, {
+    token: makeToken(users.student),
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.attendance.total_sessions, 0);
+  assert.equal(res.body.attendance.avg_turnout_pct, null);
+});
+
+test('the summary counts distinct forum posts and keeps total replies', async () => {
+  setHandler(
+    summaryHandler({
+      enrolled: true,
+      forum: { total_doubts: 3, open_doubts: 1, resolved_doubts: 2, total_replies: 5 },
+    })
+  );
+
+  const res = await request(base, 'GET', `/classrooms/${CLASSROOM}/summary`, {
+    token: makeToken(users.student),
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.forum, {
+    total_doubts: 3,
+    open_doubts: 1,
+    resolved_doubts: 2,
+    total_replies: 5,
+  });
+
+  const call = calls.find((c) => /total_doubts/i.test(c.sql));
+  assert.ok(call);
+  const sql = normalizeSql(call.sql);
+  assert.match(sql, /COUNT\(DISTINCT dp\.id\)::int as total_doubts/i);
+  assert.match(
+    sql,
+    /COUNT\(DISTINCT CASE WHEN dp\.status = 'OPEN' THEN dp\.id END\)::int as open_doubts/i
+  );
+  assert.match(
+    sql,
+    /COUNT\(DISTINCT CASE WHEN dp\.status = 'RESOLVED' THEN dp\.id END\)::int as resolved_doubts/i
+  );
+  assert.match(sql, /COUNT\(dr\.id\)::int as total_replies/i);
 });

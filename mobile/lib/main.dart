@@ -567,7 +567,15 @@ class _ClassroomsHomeViewState extends State<ClassroomsHomeView>
                         mode: LiveActivityMode.quiz,
                       )
                     else if (_detailTabController.index == 3)
-                      DoubtForumScreen(initialClassroomId: _selectedClassroomId)
+                      SizedBox(
+                        height:
+                            (MediaQuery.sizeOf(context).height * 0.6)
+                                .clamp(420.0, 720.0)
+                                .toDouble(),
+                        child: DoubtForumScreen(
+                          initialClassroomId: _selectedClassroomId,
+                        ),
+                      )
                     else
                       EmptyStateWidget(
                         title: 'Live Attendance Scanner',

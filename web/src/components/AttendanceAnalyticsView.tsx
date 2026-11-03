@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -73,6 +73,7 @@ interface StudentStat {
   full_name: string;
   email: string;
   joined_at: string;
+  total_sessions: number;
   attended_sessions: number;
   attendance_percentage: string;
   avg_acl_ms: string | null;
@@ -83,9 +84,26 @@ interface SessionRecord {
   id: string;
   started_at: string;
   ended_at: string | null;
+  is_live?: boolean;
   present_count: number;
+  enrolled_count: number;
   avg_acl_ms: string | null;
 }
+
+interface DrilldownSession {
+  session_id: string;
+  started_at: string;
+  ended_at: string | null;
+  /** False when the session started before the student enrolled. */
+  eligible?: boolean;
+  status: string;
+  validated_at: string | null;
+  acl_ms: number | null;
+}
+
+/** A session still counts as live when the backend flags it or it has not ended. */
+const isSessionLive = (session: SessionRecord): boolean =>
+  session.is_live === true || session.ended_at == null;
 
 interface ClassroomStats {
   total_sessions: number;
@@ -101,8 +119,16 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
   const [students, setStudents] = useState<StudentStat[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [classroomInfo, setClassroomInfo] = useState<any>(null);
+  // `loading` is reserved for the initial/full-page load. Background refreshes
+  // (for example after an override) must not replace the mounted page or dialog.
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Request identity guards so a slow response for a previous section/student
+  // can never overwrite the current view.
+  const analyticsSeqRef = useRef(0);
+  const drilldownSeqRef = useRef(0);
 
   // Export Menu state
   const [exportAnchorEl, setExportAnchorEl] = useState<null | HTMLElement>(null);
@@ -114,7 +140,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
 
   // Student Drilldown Modal state
   const [drilldownStudent, setDrilldownStudent] = useState<StudentStat | null>(null);
-  const [drilldownSessions, setDrilldownSessions] = useState<any[]>([]);
+  const [drilldownSessions, setDrilldownSessions] = useState<DrilldownSession[]>([]);
   const [loadingDrilldown, setLoadingDrilldown] = useState(false);
   const [overridingSessionId, setOverridingSessionId] = useState<string | null>(null);
 
@@ -122,56 +148,113 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
   const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null);
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'info' | 'warning' | 'error'>('success');
 
+  const fetchAnalytics = useCallback(
+    async ({ background = false }: { background?: boolean } = {}) => {
+      const seq = ++analyticsSeqRef.current;
+
+      if (background) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+        setError(null);
+      }
+
+      try {
+        const res = await apiFetch(`/attendance/classroom/${classroomId}/summary`);
+        const data = await readJson<{
+          stats?: ClassroomStats;
+          students?: StudentStat[];
+          sessions?: SessionRecord[];
+          classroom?: any;
+          error?: string;
+        }>(res);
+
+        // A newer request (section change or manual refresh) already started.
+        if (seq !== analyticsSeqRef.current) return;
+
+        if (res.ok && data) {
+          setStats(data.stats || null);
+          setStudents(data.students || []);
+          setSessions(data.sessions || []);
+          setClassroomInfo(data.classroom || null);
+        } else if (background) {
+          setSnackbarSeverity('error');
+          setSnackbarMessage(data?.error || 'Failed to refresh attendance analytics.');
+        } else {
+          setError(data?.error || 'Failed to load attendance analytics');
+        }
+      } catch (err) {
+        if (seq !== analyticsSeqRef.current) return;
+        console.error('Error fetching analytics:', err);
+        if (background) {
+          setSnackbarSeverity('error');
+          setSnackbarMessage('Background refresh failed. Showing the last loaded data.');
+        } else {
+          setError('Network error loading attendance analytics');
+        }
+      } finally {
+        if (seq === analyticsSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [classroomId]
+  );
+
   useEffect(() => {
     if (classroomId) {
+      // Switching sections must not leave the previous student's drill-down open.
+      setDrilldownStudent(null);
+      setDrilldownSessions([]);
+      setLoadingDrilldown(false);
       fetchAnalytics();
     }
-  }, [classroomId]);
+    return () => {
+      // Ignore any in-flight responses that belong to the previous section.
+      analyticsSeqRef.current += 1;
+      drilldownSeqRef.current += 1;
+    };
+  }, [classroomId, fetchAnalytics]);
 
-  const fetchAnalytics = async () => {
-    setLoading(true);
-    setError(null);
+  const handleOpenStudentDrilldown = async (student: StudentStat) => {
+    const seq = ++drilldownSeqRef.current;
+    setDrilldownStudent(student);
+    // Never show the previous student's sessions while the new request loads.
+    setDrilldownSessions([]);
+    setLoadingDrilldown(true);
+
     try {
-      const res = await apiFetch(`/attendance/classroom/${classroomId}/summary`);
-      const data = await readJson<{
-        stats?: ClassroomStats;
-        students?: StudentStat[];
-        sessions?: SessionRecord[];
-        classroom?: any;
-        error?: string;
-      }>(res);
-      if (res.ok && data) {
-        setStats(data.stats || null);
-        setStudents(data.students || []);
-        setSessions(data.sessions || []);
-        setClassroomInfo(data.classroom || null);
-      } else {
-        setError(data?.error || 'Failed to load attendance analytics');
+      const res = await apiFetch(
+        `/attendance/classroom/${classroomId}/student/${student.student_id}`
+      );
+      const data = await readJson<{ sessions?: DrilldownSession[]; error?: string }>(res);
+      if (seq !== drilldownSeqRef.current) return;
+
+      if (!res.ok) {
+        setSnackbarSeverity('error');
+        setSnackbarMessage(data?.error || 'Failed to load student attendance.');
+        return;
       }
+
+      setDrilldownSessions(data?.sessions || []);
     } catch (err) {
-      console.error('Error fetching analytics:', err);
-      setError('Network error loading attendance analytics');
+      if (seq !== drilldownSeqRef.current) return;
+      console.error('Error fetching student drilldown:', err);
+      setSnackbarSeverity('error');
+      setSnackbarMessage('Network error loading student attendance.');
     } finally {
-      setLoading(false);
+      if (seq === drilldownSeqRef.current) setLoadingDrilldown(false);
     }
   };
 
-  const handleOpenStudentDrilldown = async (student: StudentStat) => {
-    setDrilldownStudent(student);
-    setLoadingDrilldown(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/attendance/classroom/${classroomId}/student/${student.student_id}`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setDrilldownSessions(data.sessions || []);
-      }
-    } catch (err) {
-      console.error('Error fetching student drilldown:', err);
-    } finally {
-      setLoadingDrilldown(false);
-    }
+  const handleCloseDrilldown = () => {
+    // Invalidate any in-flight drill-down so a late response cannot populate
+    // the dialog after it has been dismissed.
+    drilldownSeqRef.current += 1;
+    setDrilldownStudent(null);
+    setDrilldownSessions([]);
+    setLoadingDrilldown(false);
   };
 
   // 1. Export Handlers (CSV & Excel)
@@ -248,8 +331,8 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
 
         setSnackbarSeverity('success');
         setSnackbarMessage(`Manually marked ${drilldownStudent.full_name} as ${newStatus} for this session.`);
-        // Refresh overall classroom stats in background
-        fetchAnalytics();
+        // Refresh classroom stats without unmounting the page or this dialog.
+        fetchAnalytics({ background: true });
       } else {
         const errorData = await res.json();
         setSnackbarSeverity('error');
@@ -295,8 +378,13 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
     }
   };
 
+  // Only students who have had at least one session since enrolling can be
+  // below the threshold. This matches the backend warning query, which ignores
+  // students who joined after the classroom's sessions took place.
   const lowAttendanceStudents = students.filter(
-    (s) => parseFloat(s.attendance_percentage || '0') < 75.0
+    (s) =>
+      Number(s.total_sessions ?? 0) > 0 &&
+      parseFloat(s.attendance_percentage || '0') < 75.0
   );
 
   if (loading) {
@@ -316,7 +404,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
         severity="error"
         sx={{ borderRadius: '10px', alignItems: 'center' }}
         action={
-          <Button color="inherit" size="small" onClick={fetchAnalytics} sx={{ textTransform: 'none', fontWeight: 700 }}>
+          <Button color="inherit" size="small" onClick={() => fetchAnalytics()} sx={{ textTransform: 'none', fontWeight: 700 }}>
             Retry
           </Button>
         }
@@ -326,18 +414,24 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
     );
   }
 
-  const noSessions = (stats?.total_sessions ?? 0) === 0;
+  // PF-1: only completed sessions count toward analytics. The session that is
+  // still running stays visible in Session History (with its live headcount)
+  // but is excluded from turnout, latency, and the "Sessions Conducted" totals.
+  const completedSessions = sessions.filter((s) => !isSessionLive(s));
+  const completedSessionCount = completedSessions.length;
+  const noSessions = completedSessionCount === 0;
 
   // Process chronological sessions data for Recharts visualizations
-  const chronologicalSessions = [...sessions].sort(
+  const chronologicalSessions = [...completedSessions].sort(
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
   );
 
-  const totalEnrolledCount = stats?.total_enrolled || (students.length > 0 ? students.length : 1);
-
   const attendanceTrendData = chronologicalSessions.map((s, idx) => {
-    const rate = totalEnrolledCount > 0
-      ? Math.min(100, Math.round((s.present_count / totalEnrolledCount) * 100))
+    // Turnout uses the roster that existed when the session started, so a
+    // student who enrolled later is not retroactively counted as absent.
+    const sessionEnrolledCount = Number(s.enrolled_count ?? stats?.total_enrolled ?? 0);
+    const rate = sessionEnrolledCount > 0
+      ? Math.min(100, Math.round((s.present_count / sessionEnrolledCount) * 100))
       : 0;
     const dateObj = new Date(s.started_at);
     const shortDate = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -349,7 +443,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
       date: shortDate,
       time: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       present: s.present_count,
-      total: totalEnrolledCount,
+      total: sessionEnrolledCount,
       rate: rate,
       acl_ms: acl,
     };
@@ -375,7 +469,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             color="warning"
             startIcon={<EmailIcon />}
             onClick={() => setWarningDialogOpen(true)}
-            disabled={students.length === 0 || (stats?.total_sessions ?? 0) === 0}
+            disabled={students.length === 0 || completedSessionCount === 0}
             sx={{ fontWeight: 700, borderRadius: '8px', textTransform: 'none' }}
           >
             Email Warnings ({lowAttendanceStudents.length})
@@ -419,14 +513,19 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             </MenuItem>
           </Menu>
 
-          <IconButton size="small" onClick={fetchAnalytics} title="Refresh Data">
-            <RefreshIcon fontSize="small" />
+          <IconButton
+            size="small"
+            onClick={() => fetchAnalytics({ background: true })}
+            title="Refresh Data"
+            disabled={refreshing}
+          >
+            {refreshing ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
           </IconButton>
         </Stack>
       </Box>
 
       {/* Low Attendance Warning Alert Banner */}
-      {lowAttendanceStudents.length > 0 && (stats?.total_sessions ?? 0) > 0 && (
+      {lowAttendanceStudents.length > 0 && completedSessionCount > 0 && (
         <Alert
           severity="warning"
           icon={<WarningAmberIcon />}
@@ -492,7 +591,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
               {noSessions ? '—' : `${stats?.average_attendance_percentage ?? 0}%`}
             </Typography>
             <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-              {noSessions ? 'No sessions yet' : `Across ${stats?.total_sessions ?? 0} total sessions`}
+              {noSessions ? 'No sessions yet' : `Across ${completedSessionCount} total sessions`}
             </Typography>
           </Paper>
         </Grid>
@@ -515,7 +614,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
               <EventNoteIcon sx={{ color: m3Tokens.color.secondary, fontSize: 20 }} />
             </Stack>
             <Typography variant="h4" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
-              {stats?.total_sessions ?? 0}
+              {noSessions ? '-' : completedSessionCount}
             </Typography>
             <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
               Anti-Proxy QR verified
@@ -845,7 +944,9 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
               <TableBody>
                 {students.map((student) => {
                   const pct = parseFloat(student.attendance_percentage || '0');
-                  const isShortage = pct < 75.0 && !noSessions;
+                  const studentTotalSessions = Number(student.total_sessions ?? 0);
+                  const hasStudentSessions = studentTotalSessions > 0;
+                  const isShortage = hasStudentSessions && pct < 75.0;
                   return (
                     <TableRow key={student.student_id} hover>
                       <TableCell sx={{ fontWeight: 600, color: m3Tokens.color.onSurface }}>
@@ -856,7 +957,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                       </TableCell>
                       <TableCell>
                         <Chip
-                          label={`${student.attended_sessions} / ${stats?.total_sessions ?? 0}`}
+                          label={`${student.attended_sessions} / ${studentTotalSessions}`}
                           size="small"
                           sx={{ fontWeight: 700, bgcolor: m3Tokens.color.surfaceVariant }}
                         />
@@ -868,24 +969,24 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                               variant="caption"
                               sx={{
                                 fontWeight: 700,
-                                color: noSessions ? m3Tokens.color.onSurfaceVariant : pct >= 75 ? 'success.main' : 'error.main',
+                                color: hasStudentSessions ? (pct >= 75 ? 'success.main' : 'error.main') : m3Tokens.color.onSurfaceVariant,
                               }}
                             >
-                              {noSessions ? '—' : `${pct}%`}
+                              {hasStudentSessions ? `${pct}%` : '—'}
                             </Typography>
                           </Stack>
                           <LinearProgress
                             variant="determinate"
-                            value={noSessions ? 0 : Math.min(100, pct)}
-                            color={noSessions ? 'inherit' : pct >= 75 ? 'success' : 'error'}
+                            value={hasStudentSessions ? Math.min(100, pct) : 0}
+                            color={hasStudentSessions ? (pct >= 75 ? 'success' : 'error') : 'inherit'}
                             sx={{ height: 6, borderRadius: '3px' }}
                           />
                         </Stack>
                       </TableCell>
                       <TableCell>
-                        {noSessions ? (
+                        {!hasStudentSessions ? (
                           <Chip
-                            label="No sessions yet"
+                            label="No sessions since joining"
                             size="small"
                             variant="outlined"
                             sx={{ fontWeight: 700, fontSize: '0.7rem' }}
@@ -985,15 +1086,20 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                       Session #{sessions.length - idx} • {new Date(s.started_at).toLocaleString()}
                     </TableCell>
                     <TableCell>
-                      {s.ended_at ? (
-                        <Chip label="COMPLETED" color="default" size="small" sx={{ fontSize: '0.65rem', fontWeight: 700 }} />
+                      {isSessionLive(s) ? (
+                        <Stack spacing={0.25}>
+                          <Chip label="ACTIVE" color="error" size="small" sx={{ fontSize: '0.65rem', fontWeight: 700, alignSelf: 'flex-start' }} />
+                          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, fontSize: '0.65rem', fontWeight: 600 }}>
+                            In progress — not yet counted
+                          </Typography>
+                        </Stack>
                       ) : (
-                        <Chip label="ACTIVE" color="error" size="small" sx={{ fontSize: '0.65rem', fontWeight: 700 }} />
+                        <Chip label="COMPLETED" color="default" size="small" sx={{ fontSize: '0.65rem', fontWeight: 700 }} />
                       )}
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={`${s.present_count} / ${stats?.total_enrolled ?? 0} present`}
+                        label={`${s.present_count} / ${s.enrolled_count ?? stats?.total_enrolled ?? 0} present`}
                         color={s.present_count > 0 ? 'success' : 'default'}
                         size="small"
                         sx={{ fontWeight: 700 }}
@@ -1023,7 +1129,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
       {/* 4. Student Attendance Drilldown & Manual Override Modal */}
       <Dialog
         open={Boolean(drilldownStudent)}
-        onClose={() => setDrilldownStudent(null)}
+        onClose={handleCloseDrilldown}
         maxWidth="md"
         fullWidth
       >
@@ -1037,7 +1143,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                 {drilldownStudent?.email} • Attendance History & Manual Status Override
               </Typography>
             </Box>
-            <IconButton size="small" onClick={() => setDrilldownStudent(null)}>
+            <IconButton size="small" onClick={handleCloseDrilldown}>
               <CloseIcon />
             </IconButton>
           </Stack>
@@ -1053,8 +1159,16 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
             </Typography>
           ) : (
             <Stack spacing={1.5} sx={{ mt: 1 }}>
+              {drilldownSessions.some((s) => s.eligible === false) && (
+                <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+                  Sessions that started before this student enrolled are shown for transparency and cannot be overridden.
+                </Typography>
+              )}
               {drilldownSessions.map((s, idx) => {
-                const isPresent = s.status === 'PRESENT';
+                // `eligible === false` means the session started before the
+                // student enrolled, so it must not look like an absence.
+                const isEligible = s.eligible !== false;
+                const isPresent = isEligible && s.status === 'PRESENT';
                 const isOverriding = overridingSessionId === s.session_id;
 
                 return (
@@ -1073,12 +1187,17 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                         <Typography variant="body2" sx={{ fontWeight: 700, color: m3Tokens.color.onSurface }}>
                           Session #{drilldownSessions.length - idx} • {new Date(s.started_at).toLocaleDateString()} at {new Date(s.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </Typography>
+                        {!isEligible && (
+                          <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mt: 0.25, fontWeight: 600 }}>
+                            Enrolled after this session
+                          </Typography>
+                        )}
                         {isPresent && s.validated_at && (
                           <Typography variant="caption" sx={{ color: m3Tokens.color.onSurfaceVariant, display: 'block', mt: 0.25 }}>
                             Validated at {new Date(s.validated_at).toLocaleTimeString()}
                           </Typography>
                         )}
-                        {!isPresent && (
+                        {isEligible && !isPresent && (
                           <Typography variant="caption" sx={{ color: 'error.main', display: 'block', mt: 0.25, fontWeight: 600 }}>
                             Not recorded / Absent
                           </Typography>
@@ -1086,7 +1205,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                       </Box>
 
                       <Stack direction="row" spacing={1.5} alignItems="center">
-                        {isPresent && s.acl_ms !== undefined && (
+                        {isPresent && s.acl_ms != null && (
                           <Chip
                             icon={<FlashOnIcon sx={{ fontSize: '0.75rem !important' }} />}
                             label={`ACL: ${s.acl_ms}ms`}
@@ -1095,26 +1214,39 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                             sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }}
                           />
                         )}
-                        <Chip
-                          icon={isPresent ? <CheckCircleIcon sx={{ fontSize: '0.85rem !important' }} /> : <CancelIcon sx={{ fontSize: '0.85rem !important' }} />}
-                          label={s.status}
-                          color={isPresent ? 'success' : 'default'}
-                          size="small"
-                          sx={{ fontWeight: 700 }}
-                        />
+                        {isEligible ? (
+                          <Chip
+                            icon={isPresent ? <CheckCircleIcon sx={{ fontSize: '0.85rem !important' }} /> : <CancelIcon sx={{ fontSize: '0.85rem !important' }} />}
+                            label={s.status}
+                            color={isPresent ? 'success' : 'default'}
+                            size="small"
+                            sx={{ fontWeight: 700 }}
+                          />
+                        ) : (
+                          <Chip
+                            label="NOT ENROLLED"
+                            color="default"
+                            variant="outlined"
+                            size="small"
+                            sx={{ fontWeight: 700, fontSize: '0.7rem' }}
+                          />
+                        )}
 
-                        {/* Manual Override Action Button */}
-                        <Button
-                          size="small"
-                          variant={isPresent ? 'outlined' : 'contained'}
-                          color={isPresent ? 'error' : 'success'}
-                          startIcon={isOverriding ? <CircularProgress size={14} color="inherit" /> : <EditIcon fontSize="small" />}
-                          disabled={isOverriding}
-                          onClick={() => handleToggleOverride(s.session_id, s.status)}
-                          sx={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'none', py: 0.5 }}
-                        >
-                          {isPresent ? 'Mark Absent' : 'Mark Present'}
-                        </Button>
+                        {/* Manual Override Action Button — only for sessions the
+                            student was enrolled for. */}
+                        {isEligible && (
+                          <Button
+                            size="small"
+                            variant={isPresent ? 'outlined' : 'contained'}
+                            color={isPresent ? 'error' : 'success'}
+                            startIcon={isOverriding ? <CircularProgress size={14} color="inherit" /> : <EditIcon fontSize="small" />}
+                            disabled={isOverriding}
+                            onClick={() => handleToggleOverride(s.session_id, s.status)}
+                            sx={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'none', py: 0.5 }}
+                          >
+                            {isPresent ? 'Mark Absent' : 'Mark Present'}
+                          </Button>
+                        )}
                       </Stack>
                     </Stack>
                   </Paper>
@@ -1124,7 +1256,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2, bgcolor: '#FFFFFF', borderTop: `1px solid ${m3Tokens.color.outlineVariant}` }}>
-          <Button onClick={() => setDrilldownStudent(null)} variant="contained">
+          <Button onClick={handleCloseDrilldown} variant="contained">
             Close
           </Button>
         </DialogActions>
@@ -1172,7 +1304,7 @@ export const AttendanceAnalyticsView: React.FC<AttendanceAnalyticsViewProps> = (
                       <TableCell sx={{ fontWeight: 600 }}>{s.full_name}</TableCell>
                       <TableCell sx={{ color: m3Tokens.color.onSurfaceVariant, fontSize: '0.8rem' }}>{s.email}</TableCell>
                       <TableCell sx={{ textAlign: 'right', fontWeight: 700, color: 'error.main' }}>
-                        {s.attendance_percentage}% ({s.attended_sessions}/{stats?.total_sessions})
+                        {s.attendance_percentage}% ({s.attended_sessions}/{s.total_sessions})
                       </TableCell>
                     </TableRow>
                   ))}

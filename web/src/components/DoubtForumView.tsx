@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -21,6 +21,7 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  Alert,
 } from '@mui/material';
 import ForumIcon from '@mui/icons-material/Forum';
 import AddIcon from '@mui/icons-material/Add';
@@ -91,8 +92,13 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
   const [posts, setPosts] = useState<DoubtPostListItem[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingHelpfulIds, setPendingHelpfulIds] = useState<string[]>([]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedDoubtId, setSelectedDoubtId] = useState<string | null>(null);
+
+  // Identity of the latest posts request, so stale responses cannot overwrite newer ones.
+  const fetchSeqRef = useRef(0);
 
   // Filters
   const [scopeTab, setScopeTab] = useState<string>('ALL');
@@ -123,7 +129,9 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
   };
 
   const fetchPosts = async (queryOverride?: string) => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
+    setError(null);
     try {
       let url = '';
       const effectiveQuery = (queryOverride !== undefined ? queryOverride : searchQuery).trim();
@@ -143,14 +151,21 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
       const res = await fetch(url, {
         headers: getAuthHeaders(),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setPosts(data.results || data.posts || []);
+      const data = await res.json().catch(() => ({}));
+      if (seq !== fetchSeqRef.current) return;
+      if (!res.ok) {
+        // Keep the last successfully loaded list visible on failure.
+        setError(data?.error || 'Failed to load doubts.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setPosts(data.results || data.posts || []);
+    } catch {
+      if (seq !== fetchSeqRef.current) return;
+      setError('Network error loading doubts.');
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -161,6 +176,9 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
 
   const handleToggleHelpful = async (e: React.MouseEvent, postId: string) => {
     e.stopPropagation();
+    if (pendingHelpfulIds.includes(postId)) return;
+    setPendingHelpfulIds((prev) => [...prev, postId]);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/helpful`, {
         method: 'POST',
@@ -170,18 +188,22 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
         },
         body: JSON.stringify({ target_type: 'POST', target_id: postId }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setPosts(
-          posts.map((p) =>
-            p.id === postId
-              ? { ...p, user_has_marked_helpful: data.marked, helpful_count: data.helpful_count }
-              : p
-          )
-        );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || 'Failed to update helpful vote. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, user_has_marked_helpful: data.marked, helpful_count: data.helpful_count }
+            : p
+        )
+      );
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setPendingHelpfulIds((prev) => prev.filter((id) => id !== postId));
     }
   };
 
@@ -357,12 +379,33 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
         )}
       </Paper>
 
+      {/* List / action error banner (keeps the last successful posts visible) */}
+      {error && (
+        <Alert
+          severity="error"
+          onClose={() => setError(null)}
+          sx={{ mb: 2, borderRadius: '12px', alignItems: 'center' }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => fetchPosts()}
+              sx={{ textTransform: 'none', fontWeight: 700 }}
+            >
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      )}
+
       {/* Doubts Post List */}
       {loading ? (
         <Box sx={{ py: 8, textAlign: 'center' }}>
           <CircularProgress />
         </Box>
-      ) : posts.length === 0 ? (
+      ) : posts.length === 0 && !error ? (
         <EmptyState
           title="No Doubts Found"
           description="No questions match the current audience scope or search filters. Be the first to ask!"
@@ -482,6 +525,7 @@ export const DoubtForumView: React.FC<DoubtForumViewProps> = ({
                       color="primary"
                       startIcon={post.user_has_marked_helpful ? <ThumbUpIcon sx={{ fontSize: '0.9rem !important' }} /> : <ThumbUpOutlinedIcon sx={{ fontSize: '0.9rem !important' }} />}
                       onClick={(e) => handleToggleHelpful(e, post.id)}
+                      disabled={pendingHelpfulIds.includes(post.id)}
                       sx={{ height: 26, fontSize: '0.75rem', textTransform: 'none', fontWeight: 700, borderRadius: '6px' }}
                     >
                       {post.helpful_count}

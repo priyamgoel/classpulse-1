@@ -83,7 +83,9 @@ router.get('/session/:id', authenticateToken, requireRole('teacher'), async (req
     const recordsResult = await db.query(
       `SELECT ar.id, ar.student_id, ar.status, ar.scan_started_at, ar.validated_at,
               u.full_name, u.email,
-              EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at))::int as acl_ms
+              CASE WHEN ar.is_manual THEN NULL
+                   ELSE GREATEST(0, ROUND(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000))::int
+              END as acl_ms
        FROM attendance_records ar
        JOIN users u ON ar.student_id = u.id
        WHERE ar.session_id = $1
@@ -124,11 +126,22 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
       return res.status(403).json({ error: 'Forbidden: You do not teach this classroom' });
     }
 
-    // 1. Total sessions conducted
+    // 1. Sessions conducted. Live sessions stay in the list so Session History
+    // can still show their present/enrolled counts, but they are excluded from
+    // every denominator and from stats.total_sessions until they end.
     const sessionsResult = await db.query(
       `SELECT s.id, s.started_at, s.ended_at,
-              COUNT(ar.id)::int as present_count,
-              ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1)::float as avg_acl_ms
+              (s.ended_at IS NULL) as is_live,
+              COUNT(ar.id) FILTER (WHERE EXISTS (
+                SELECT 1 FROM enrollments e
+                WHERE e.classroom_id = s.classroom_id
+                  AND e.student_id = ar.student_id
+                  AND e.joined_at <= s.started_at
+              ))::int as present_count,
+              (SELECT COUNT(*)::int FROM enrollments e
+                WHERE e.classroom_id = s.classroom_id AND e.joined_at <= s.started_at) as enrolled_count,
+              ROUND(AVG(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000)
+                    FILTER (WHERE ar.is_manual = FALSE)::numeric, 1)::float as avg_acl_ms
        FROM sessions s
        LEFT JOIN attendance_records ar ON ar.session_id = s.id
        WHERE s.classroom_id = $1
@@ -137,12 +150,14 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
       [classroomId]
     );
 
-    const totalSessions = sessionsResult.rows.length;
+    // Only completed sessions count toward "Sessions Conducted".
+    const totalSessions = sessionsResult.rows.filter((s) => s.ended_at != null).length;
 
-    // 2. Per-student attendance breakdown. Only sessions held after the
-    // student enrolled count toward their denominator.
+    // 2. Per-student attendance breakdown. Only completed sessions held after
+    // the student enrolled count toward their denominator.
     const studentsResult = await db.query(
       `SELECT u.id as student_id, u.full_name, u.email, en.joined_at,
+              COUNT(DISTINCT s.id)::int as total_sessions,
               COUNT(ar.id)::int as attended_sessions,
               CASE
                 WHEN COUNT(DISTINCT s.id) > 0 THEN
@@ -150,10 +165,13 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
                 ELSE 0
               END as attendance_percentage,
               MAX(ar.validated_at) as last_attendance_at,
-              ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1)::float as avg_acl_ms
+              ROUND(AVG(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000)
+                    FILTER (WHERE ar.is_manual = FALSE)::numeric, 1)::float as avg_acl_ms
        FROM enrollments en
        JOIN users u ON en.student_id = u.id
-       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id AND s.started_at >= en.joined_at
+       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id
+         AND s.started_at >= en.joined_at
+         AND s.ended_at IS NOT NULL
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = u.id
        WHERE en.classroom_id = $1
        GROUP BY u.id, u.full_name, u.email, en.joined_at
@@ -161,17 +179,25 @@ router.get('/classroom/:id/summary', authenticateToken, requireRole('teacher'), 
       [classroomId]
     );
 
-    // 3. Aggregate statistics
+    // 3. Aggregate statistics. Students who enrolled after every session have
+    // no eligible sessions yet and must not drag the class average down.
     const totalEnrolled = studentsResult.rows.length;
+    const studentsWithSessions = studentsResult.rows.filter(
+      (s) => Number(s.total_sessions || 0) > 0
+    );
     let avgAttendancePercentage = 0;
-    if (totalEnrolled > 0) {
-      const sum = studentsResult.rows.reduce((acc, s) => acc + parseFloat(s.attendance_percentage || 0), 0);
-      avgAttendancePercentage = Math.round((sum / totalEnrolled) * 10) / 10;
+    if (studentsWithSessions.length > 0) {
+      const sum = studentsWithSessions.reduce(
+        (acc, s) => acc + parseFloat(s.attendance_percentage || 0),
+        0
+      );
+      avgAttendancePercentage = Math.round((sum / studentsWithSessions.length) * 10) / 10;
     }
 
     // Overall Average ACL latency across all records for this classroom
     const aclResult = await db.query(
-      `SELECT ROUND(AVG(EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at)))::numeric, 1) as overall_avg_acl_ms
+      `SELECT ROUND(AVG(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000)
+                    FILTER (WHERE ar.is_manual = FALSE)::numeric, 1) as overall_avg_acl_ms
        FROM attendance_records ar
        JOIN sessions s ON ar.session_id = s.id
        WHERE s.classroom_id = $1`,
@@ -214,18 +240,27 @@ router.get('/classroom/:id/student/:studentId', authenticateToken, requireRole('
     }
 
     const enrollment = await db.query(
-      'SELECT id FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      'SELECT id, joined_at FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
       [classroomId, studentId]
     );
     if (enrollment.rows.length === 0) {
       return res.status(400).json({ error: 'Student is not enrolled in this classroom' });
     }
 
-    // List all sessions for this classroom and whether this student attended
+    // List all sessions for this classroom and whether this student attended.
+    // Sessions that started before the student enrolled are kept for history
+    // but marked ineligible so they cannot look like absences or be overridden.
     const records = await db.query(
       `SELECT s.id as session_id, s.started_at, s.ended_at,
               ar.status, ar.validated_at, ar.scan_started_at,
-              EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at))::int as acl_ms
+              (s.started_at >= (
+                SELECT joined_at FROM enrollments
+                WHERE classroom_id = s.classroom_id AND student_id = $2
+              )) AS eligible,
+              CASE WHEN ar.id IS NULL THEN NULL
+                   WHEN ar.is_manual THEN NULL
+                   ELSE GREATEST(0, ROUND(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000))::int
+              END as acl_ms
        FROM sessions s
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = $2
        WHERE s.classroom_id = $1
@@ -235,14 +270,18 @@ router.get('/classroom/:id/student/:studentId', authenticateToken, requireRole('
 
     res.json({
       student: studentInfo.rows[0],
-      sessions: records.rows.map((r) => ({
-        session_id: r.session_id,
-        started_at: r.started_at,
-        ended_at: r.ended_at,
-        status: r.status || 'ABSENT',
-        validated_at: r.validated_at,
-        acl_ms: r.acl_ms,
-      })),
+      sessions: records.rows.map((r) => {
+        const eligible = r.eligible === true;
+        return {
+          session_id: r.session_id,
+          started_at: r.started_at,
+          ended_at: r.ended_at,
+          eligible,
+          status: eligible ? (r.status || 'ABSENT') : 'NOT_ENROLLED',
+          validated_at: eligible ? r.validated_at : null,
+          acl_ms: eligible ? r.acl_ms : null,
+        };
+      }),
     });
   } catch (err) {
     console.error('Error fetching student drilldown:', err);
@@ -262,7 +301,9 @@ router.get('/me', authenticateToken, requireRole('student'), async (req, res) =>
               c.id as classroom_id, c.section_name,
               co.course_code, co.course_name,
               u.full_name as teacher_name,
-              EXTRACT(MILLISECONDS FROM (ar.validated_at - ar.scan_started_at))::int as acl_ms
+              CASE WHEN ar.is_manual THEN NULL
+                   ELSE GREATEST(0, ROUND(EXTRACT(EPOCH FROM (ar.validated_at - ar.scan_started_at)) * 1000))::int
+              END as acl_ms
        FROM attendance_records ar
        JOIN sessions s ON ar.session_id = s.id
        JOIN classrooms c ON s.classroom_id = c.id
@@ -288,7 +329,9 @@ router.get('/me', authenticateToken, requireRole('student'), async (req, res) =>
        JOIN classrooms c ON en.classroom_id = c.id
        JOIN courses co ON c.course_id = co.id
        JOIN users u ON c.teacher_id = u.id
-       LEFT JOIN sessions s ON s.classroom_id = c.id AND s.started_at >= en.joined_at
+       LEFT JOIN sessions s ON s.classroom_id = c.id
+         AND s.started_at >= en.joined_at
+         AND s.ended_at IS NOT NULL
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = $1
        WHERE en.student_id = $1
        GROUP BY c.id, co.course_code, co.course_name, c.section_name, u.full_name
@@ -351,7 +394,7 @@ router.post('/override', authenticateToken, requireRole('teacher'), async (req, 
 
     // Verify session belongs to this classroom
     const sessionCheck = await db.query(
-      'SELECT id FROM sessions WHERE id = $1 AND classroom_id = $2',
+      'SELECT id, started_at FROM sessions WHERE id = $1 AND classroom_id = $2',
       [session_id, classroom_id]
     );
     if (sessionCheck.rows.length === 0) {
@@ -360,22 +403,35 @@ router.post('/override', authenticateToken, requireRole('teacher'), async (req, 
 
     // Verify student is enrolled
     const enrollCheck = await db.query(
-      'SELECT id FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
+      'SELECT id, joined_at FROM enrollments WHERE classroom_id = $1 AND student_id = $2',
       [classroom_id, student_id]
     );
     if (enrollCheck.rows.length === 0) {
       return res.status(400).json({ error: 'Student is not enrolled in this classroom' });
     }
 
+    // Sessions that started before the student enrolled are outside their
+    // attendance record. Reject the override rather than writing a record that
+    // analytics will ignore.
+    if (
+      new Date(sessionCheck.rows[0].started_at) <
+      new Date(enrollCheck.rows[0].joined_at)
+    ) {
+      return res.status(400).json({
+        error: 'Cannot override attendance for a session that started before the student enrolled.',
+      });
+    }
+
     const normalizedStatus = status.toUpperCase();
 
     if (normalizedStatus === 'PRESENT') {
-      // Upsert attendance record
+      // Upsert attendance record. Manual records are tagged so ACL metrics can
+      // ignore them, and an existing real scan keeps its original timestamps.
       await db.query(
-        `INSERT INTO attendance_records (session_id, student_id, scan_started_at, validated_at, status)
-         VALUES ($1, $2, now(), now(), 'PRESENT')
+        `INSERT INTO attendance_records (session_id, student_id, scan_started_at, validated_at, status, is_manual)
+         VALUES ($1, $2, now(), now(), 'PRESENT', TRUE)
          ON CONFLICT (session_id, student_id)
-         DO UPDATE SET status = 'PRESENT', validated_at = now()`,
+         DO UPDATE SET status = 'PRESENT'`,
         [session_id, student_id]
       );
     } else {
@@ -478,9 +534,9 @@ router.post(
 
     const classroom = classCheck.rows[0];
 
-    // Total sessions
+    // Total completed sessions
     const sessionsRes = await db.query(
-      `SELECT id FROM sessions WHERE classroom_id = $1`,
+      `SELECT id FROM sessions WHERE classroom_id = $1 AND ended_at IS NOT NULL`,
       [classroomId]
     );
     const totalSessions = sessionsRes.rows.length;
@@ -490,8 +546,8 @@ router.post(
     }
 
     // Enrolled students with attendance percentage. The denominator is the
-    // number of sessions held since *that student* enrolled, not every session
-    // the classroom ever had.
+    // number of completed sessions held since *that student* enrolled, not
+    // every session the classroom ever had.
     const studentsRes = await db.query(
       `SELECT u.id as student_id, u.full_name, u.email,
               COUNT(DISTINCT s.id)::int as total_sessions,
@@ -503,7 +559,9 @@ router.post(
               END as attendance_percentage
        FROM enrollments en
        JOIN users u ON en.student_id = u.id
-       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id AND s.started_at >= en.joined_at
+       LEFT JOIN sessions s ON s.classroom_id = en.classroom_id
+         AND s.started_at >= en.joined_at
+         AND s.ended_at IS NOT NULL
        LEFT JOIN attendance_records ar ON ar.session_id = s.id AND ar.student_id = u.id
        WHERE en.classroom_id = $1
        GROUP BY u.id, u.full_name, u.email

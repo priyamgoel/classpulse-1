@@ -126,6 +126,19 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   const [replyAnonymous, setReplyAnonymous] = useState(false);
   const [submittingReply, setSubmittingReply] = useState(false);
 
+  // In-flight action tracking (so controls can be disabled per action)
+  const [pendingPostHelpful, setPendingPostHelpful] = useState(false);
+  const [pendingReplyActions, setPendingReplyActions] = useState<string[]>([]);
+  const [revealingAuthorLoading, setRevealingAuthorLoading] = useState(false);
+
+  const isReplyActionPending = (replyId: string) => pendingReplyActions.includes(replyId);
+
+  const beginReplyAction = (replyId: string) =>
+    setPendingReplyActions((prev) => (prev.includes(replyId) ? prev : [...prev, replyId]));
+
+  const endReplyAction = (replyId: string) =>
+    setPendingReplyActions((prev) => prev.filter((id) => id !== replyId));
+
   const handleOpenEditPost = () => {
     if (!post) return;
     setEditTitle(post.title);
@@ -275,7 +288,9 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
   };
 
   const handleTogglePostHelpful = async () => {
-    if (!post) return;
+    if (!post || pendingPostHelpful) return;
+    setPendingPostHelpful(true);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/helpful`, {
         method: 'POST',
@@ -285,21 +300,28 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
         },
         body: JSON.stringify({ target_type: 'POST', target_id: post.id }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setPost({
-          ...post,
-          user_has_marked_helpful: data.marked,
-          helpful_count: data.helpful_count,
-        });
-        onPostUpdated();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || 'Failed to update helpful vote. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setPost({
+        ...post,
+        user_has_marked_helpful: data.marked,
+        helpful_count: data.helpful_count,
+      });
+      onPostUpdated();
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setPendingPostHelpful(false);
     }
   };
 
   const handleToggleReplyHelpful = async (replyId: string) => {
+    if (isReplyActionPending(replyId)) return;
+    beginReplyAction(replyId);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/helpful`, {
         method: 'POST',
@@ -309,69 +331,101 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
         },
         body: JSON.stringify({ target_type: 'REPLY', target_id: replyId }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setReplies(
-          replies.map((r) =>
-            r.id === replyId
-              ? { ...r, user_has_marked_helpful: data.marked, helpful_count: data.helpful_count }
-              : r
-          )
-        );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || 'Failed to update helpful vote. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === replyId
+            ? { ...r, user_has_marked_helpful: data.marked, helpful_count: data.helpful_count }
+            : r
+        )
+      );
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      endReplyAction(replyId);
     }
   };
 
   const handleRevealAuthor = async () => {
-    if (!post) return;
+    if (!post || revealingAuthorLoading) return;
+    setRevealingAuthorLoading(true);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/${post.id}/reveal-author`, {
         method: 'POST',
         headers: getAuthHeaders(),
       });
-      const data = await res.json();
-      if (res.ok && data.author) {
-        setRevealedAuthor(data.author);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || 'Failed to reveal author. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      if (!data.author) {
+        setError('Failed to reveal author. Please try again.');
+        return;
+      }
+      setRevealedAuthor(data.author);
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      setRevealingAuthorLoading(false);
     }
   };
 
   const handleAcceptSolution = async (replyId: string) => {
+    if (isReplyActionPending(replyId)) return;
+    beginReplyAction(replyId);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/replies/${replyId}/accept-solution`, {
         method: 'POST',
         headers: getAuthHeaders(),
       });
-      const data = await res.json();
-      if (res.ok) {
-        fetchDoubtDetails();
-        onPostUpdated();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || 'Failed to update the accepted solution. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      fetchDoubtDetails();
+      onPostUpdated();
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      endReplyAction(replyId);
     }
   };
 
   const handleEndorseReply = async (replyId: string) => {
+    if (isReplyActionPending(replyId)) return;
+    beginReplyAction(replyId);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/replies/${replyId}/endorse`, {
         method: 'POST',
         headers: getAuthHeaders(),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setReplies(
-          replies.map((r) =>
-            r.id === replyId ? { ...r, is_teacher_endorsed: data.reply.is_teacher_endorsed } : r
-          )
-        );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || 'Failed to update endorsement. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      if (!data?.reply) {
+        setError('Failed to update endorsement. Please try again.');
+        return;
+      }
+      setReplies((prev) =>
+        prev.map((r) =>
+          r.id === replyId ? { ...r, is_teacher_endorsed: data.reply.is_teacher_endorsed } : r
+        )
+      );
+    } catch {
+      setError('Network error. Please try again.');
+    } finally {
+      endReplyAction(replyId);
     }
   };
 
@@ -380,6 +434,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
     if (!replyBody.trim() || !post) return;
 
     setSubmittingReply(true);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/doubts/${post.id}/replies`, {
         method: 'POST',
@@ -393,15 +448,17 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (res.ok && data.reply) {
-        setReplyBody('');
-        setReplyAnonymous(false);
-        fetchDoubtDetails();
-        onPostUpdated();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.reply) {
+        setError(data?.error || 'Failed to post your answer. Please try again.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
+      setReplyBody('');
+      setReplyAnonymous(false);
+      fetchDoubtDetails();
+      onPostUpdated();
+    } catch {
+      setError('Network error. Please try again.');
     } finally {
       setSubmittingReply(false);
     }
@@ -426,12 +483,18 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
           <Box sx={{ py: 8, textAlign: 'center' }}>
             <CircularProgress />
           </Box>
-        ) : error || !post ? (
+        ) : !post ? (
           <Alert severity="error" sx={{ my: 2 }}>
             {error || 'Question not found'}
           </Alert>
         ) : (
           <Stack spacing={3}>
+            {error && (
+              <Alert severity="error" onClose={() => setError(null)} sx={{ borderRadius: '8px' }}>
+                {error}
+              </Alert>
+            )}
+
             {/* Post Card */}
             <Paper
               elevation={0}
@@ -538,6 +601,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                       color="secondary"
                       startIcon={<VisibilityIcon />}
                       onClick={handleRevealAuthor}
+                      disabled={revealingAuthorLoading}
                       sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
                     >
                       Reveal Real Name
@@ -579,6 +643,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                     color="primary"
                     startIcon={post.user_has_marked_helpful ? <ThumbUpIcon /> : <ThumbUpOutlinedIcon />}
                     onClick={handleTogglePostHelpful}
+                    disabled={pendingPostHelpful}
                     sx={{ textTransform: 'none', fontWeight: 700, borderRadius: '8px' }}
                   >
                     Helpful ({post.helpful_count})
@@ -711,6 +776,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                             color="success"
                             startIcon={<CheckCircleIcon />}
                             onClick={() => handleAcceptSolution(reply.id)}
+                            disabled={isReplyActionPending(reply.id)}
                             sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.75rem' }}
                           >
                             {reply.is_solution ? 'Accepted' : 'Accept Solution'}
@@ -724,6 +790,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                               color="primary"
                               startIcon={<VerifiedIcon />}
                               onClick={() => handleEndorseReply(reply.id)}
+                              disabled={isReplyActionPending(reply.id)}
                               sx={{ textTransform: 'none', fontWeight: 700, fontSize: '0.75rem' }}
                             >
                               {reply.is_teacher_endorsed ? 'Endorsed' : 'Endorse'}
@@ -735,6 +802,7 @@ export const DoubtDetailModal: React.FC<DoubtDetailModalProps> = ({
                             size="small"
                             color={reply.user_has_marked_helpful ? 'primary' : 'default'}
                             onClick={() => handleToggleReplyHelpful(reply.id)}
+                            disabled={isReplyActionPending(reply.id)}
                           >
                             {reply.user_has_marked_helpful ? <ThumbUpIcon fontSize="small" /> : <ThumbUpOutlinedIcon fontSize="small" />}
                             <Typography variant="caption" sx={{ ml: 0.5, fontWeight: 700 }}>

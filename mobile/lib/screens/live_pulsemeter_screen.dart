@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -59,11 +60,17 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
 
   String _getSubmittedDisplayValue() {
     if (widget.type == 'WORD_CLOUD') {
-      return _wordController.text.isNotEmpty ? _wordController.text : (widget.initialResponseValue?.toString() ?? '');
+      return _wordController.text.isNotEmpty
+          ? _wordController.text
+          : (widget.initialResponseValue?.toString() ?? '');
     } else if (widget.type == 'MCQ') {
-      final optId = _selectedOptionId ?? widget.initialResponseValue?.toString();
+      final optId =
+          _selectedOptionId ?? widget.initialResponseValue?.toString();
       final options = (widget.config['options'] as List?) ?? [];
-      final opt = options.firstWhere((o) => o['id'] == optId, orElse: () => null);
+      final opt = options.firstWhere(
+        (o) => o['id'] == optId,
+        orElse: () => null,
+      );
       return opt != null ? '${opt['text']}' : (optId ?? '');
     } else if (widget.type == 'RATING_SCALE') {
       return '${_selectedRating ?? widget.initialResponseValue} ★';
@@ -72,6 +79,7 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
   }
 
   Future<void> _submitResponse() async {
+    if (_isSubmitting) return;
     dynamic responseValue;
 
     if (widget.type == 'WORD_CLOUD') {
@@ -108,31 +116,52 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
 
     try {
       final token = AuthService.token;
-      final response = await http.post(
-        Uri.parse('${AuthService.baseUrl}/live-activities/${widget.activityId}/respond'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'response_value': responseValue,
-        }),
-      );
+      final response = await http
+          .post(
+            Uri.parse(
+              '${AuthService.baseUrl}/live-activities/${widget.activityId}/respond',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'response_value': responseValue}),
+          )
+          .timeout(const Duration(seconds: 10));
 
-      final data = jsonDecode(response.body);
+      if (!mounted) return;
 
-      if (response.statusCode == 201) {
+      Map<String, dynamic> data = {};
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) data = decoded;
+      } catch (_) {}
+
+      // 409 means the response was already stored (e.g. the original request
+      // succeeded but its response was lost), so treat it as submitted.
+      if (response.statusCode == 201 || response.statusCode == 409) {
         setState(() {
           _hasSubmitted = true;
           _isSubmitting = false;
+          _errorMessage = null;
         });
-      } else {
-        setState(() {
-          _errorMessage = data['error'] ?? 'Failed to submit response.';
-          _isSubmitting = false;
-        });
+        return;
       }
+
+      setState(() {
+        _errorMessage =
+            data['error']?.toString() ??
+            'Server error (HTTP ${response.statusCode})';
+        _isSubmitting = false;
+      });
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Submission timed out. Please retry.';
+        _isSubmitting = false;
+      });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Network error submitting response. Please try again.';
         _isSubmitting = false;
@@ -201,7 +230,10 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         color: M3Tokens.primaryContainer,
                         borderRadius: BorderRadius.circular(6),
@@ -240,12 +272,19 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                      const Icon(
+                        Icons.error_outline,
+                        color: Colors.red,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: const TextStyle(color: Colors.red, fontSize: 13),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ],
@@ -263,7 +302,11 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                   ),
                   child: Column(
                     children: [
-                      const Icon(Icons.check_circle, color: Colors.green, size: 56),
+                      const Icon(
+                        Icons.check_circle,
+                        color: Colors.green,
+                        size: 56,
+                      ),
                       const SizedBox(height: 16),
                       const Text(
                         'Response Recorded!',
@@ -277,12 +320,18 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                       const Text(
                         'Your feedback has been submitted to the instructor.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 13, color: M3Tokens.onSurfaceVariant),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: M3Tokens.onSurfaceVariant,
+                        ),
                       ),
                       if (_getSubmittedDisplayValue().isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(8),
@@ -322,22 +371,28 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                     style: FilledButton.styleFrom(
                       backgroundColor: M3Tokens.primary,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
+                        borderRadius: BorderRadius.circular(
+                          M3Tokens.shapeMedium,
+                        ),
                       ),
                     ),
-                    child: _isSubmitting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+                    child:
+                        _isSubmitting
+                            ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                            : const Text(
+                              'Submit Response',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
                             ),
-                          )
-                        : const Text(
-                            'Submit Response',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                          ),
                   ),
                 ),
               ],
@@ -419,7 +474,8 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                   color: isSelected ? M3Tokens.primaryContainer : Colors.white,
                   borderRadius: BorderRadius.circular(M3Tokens.shapeMedium),
                   border: Border.all(
-                    color: isSelected ? M3Tokens.primary : M3Tokens.outlineVariant,
+                    color:
+                        isSelected ? M3Tokens.primary : M3Tokens.outlineVariant,
                     width: isSelected ? 2 : 1,
                   ),
                 ),
@@ -429,7 +485,10 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: isSelected ? M3Tokens.primary : Colors.grey.shade100,
+                        color:
+                            isSelected
+                                ? M3Tokens.primary
+                                : Colors.grey.shade100,
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
@@ -448,13 +507,18 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
                         optText,
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
                           color: M3Tokens.onSurface,
                         ),
                       ),
                     ),
                     if (isSelected)
-                      const Icon(Icons.check_circle, color: M3Tokens.primary, size: 20),
+                      const Icon(
+                        Icons.check_circle,
+                        color: M3Tokens.primary,
+                        size: 20,
+                      ),
                   ],
                 ),
               ),
@@ -488,38 +552,42 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
         Wrap(
           spacing: 10,
           runSpacing: 10,
-          children: items.map((val) {
-            final isSelected = _selectedRating == val;
-            return InkWell(
-              onTap: () {
-                setState(() {
-                  _selectedRating = val;
-                });
-              },
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: isSelected ? M3Tokens.primary : Colors.white,
+          children:
+              items.map((val) {
+                final isSelected = _selectedRating == val;
+                return InkWell(
+                  onTap: () {
+                    setState(() {
+                      _selectedRating = val;
+                    });
+                  },
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isSelected ? M3Tokens.primary : M3Tokens.outlineVariant,
-                    width: isSelected ? 2 : 1,
+                  child: Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: isSelected ? M3Tokens.primary : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color:
+                            isSelected
+                                ? M3Tokens.primary
+                                : M3Tokens.outlineVariant,
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$val',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected ? Colors.white : M3Tokens.onSurface,
+                      ),
+                    ),
                   ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  '$val',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: isSelected ? Colors.white : M3Tokens.onSurface,
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
+                );
+              }).toList(),
         ),
         const SizedBox(height: 16),
         Row(
@@ -527,11 +595,17 @@ class _LivePulseMeterScreenState extends State<LivePulseMeterScreen> {
           children: [
             Text(
               '$min: $lowLabel',
-              style: const TextStyle(fontSize: 12, color: M3Tokens.onSurfaceVariant),
+              style: const TextStyle(
+                fontSize: 12,
+                color: M3Tokens.onSurfaceVariant,
+              ),
             ),
             Text(
               '$max: $highLabel',
-              style: const TextStyle(fontSize: 12, color: M3Tokens.onSurfaceVariant),
+              style: const TextStyle(
+                fontSize: 12,
+                color: M3Tokens.onSurfaceVariant,
+              ),
             ),
           ],
         ),

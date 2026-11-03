@@ -12,16 +12,30 @@ const MAX_EMAIL_LENGTH = 254;
 const MAX_FULL_NAME_LENGTH = 120;
 const MIN_PASSWORD_LENGTH = 8;
 
+const normalizeEmail = (req) =>
+  String(req.body && req.body.email ? req.body.email : '').trim().toLowerCase();
+
 const signupRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 20,
+  max: Number(process.env.AUTH_SIGNUP_RATE_LIMIT_MAX) || 50,
   message: 'Too many requests. Please try again later.',
 });
 
-const loginRateLimit = rateLimit({
+const loginEmailRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX) || 20,
+  max: Number(process.env.AUTH_LOGIN_EMAIL_RATE_LIMIT_MAX) || 10,
+  message: 'Too many login attempts for this account. Please try again later.',
+  keyGenerator: (req) => {
+    const email = normalizeEmail(req);
+    return email ? `email:${email}` : `ip:${req.ip}`;
+  },
+});
+
+const loginIpRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.AUTH_LOGIN_IP_RATE_LIMIT_MAX) || 100,
   message: 'Too many requests. Please try again later.',
+  keyGenerator: (req) => `ip:${req.ip}`,
 });
 
 // POST /auth/signup — Create a new account (teacher or student)
@@ -104,7 +118,7 @@ router.post('/signup', signupRateLimit, async (req, res) => {
 });
 
 // POST /auth/login — Authenticate user and issue JWT
-router.post('/login', loginRateLimit, async (req, res) => {
+router.post('/login', loginIpRateLimit, loginEmailRateLimit, async (req, res) => {
   try {
     const { email, password } = req.body;
 

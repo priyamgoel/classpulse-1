@@ -52,13 +52,12 @@ export const WordCloudMuteDialog: React.FC<WordCloudMuteDialogProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   React.useEffect(() => {
-    if (studentId) {
-      setTargetStudentId(studentId);
-    }
-    if (defaultReason) {
-      setReason(defaultReason);
-    }
-  }, [studentId, defaultReason]);
+    if (!open) return;
+    setTargetStudentId(studentId ?? '');
+    setReason(defaultReason ?? '');
+    setError(null);
+    setDurationDays(7);
+  }, [open, studentId, defaultReason]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,7 +86,9 @@ export const WordCloudMuteDialog: React.FC<WordCloudMuteDialogProps> = ({
 
       const data = await res.json();
       if (res.ok) {
+        setTargetStudentId('');
         setReason('');
+        setDurationDays(7);
         if (onSuccess) onSuccess();
         onClose();
       } else {

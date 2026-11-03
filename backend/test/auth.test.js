@@ -3,6 +3,12 @@ const assert = require('node:assert/strict');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// Keep the per-email cap small so the limiter tests stay fast. These values are
+// read when src/routes/auth.js is first required by helpers/app below.
+process.env.AUTH_LOGIN_EMAIL_RATE_LIMIT_MAX = '3';
+process.env.AUTH_LOGIN_IP_RATE_LIMIT_MAX = '25';
+process.env.AUTH_SIGNUP_RATE_LIMIT_MAX = '50';
+
 const { buildApp } = require('./helpers/app');
 const { setHandler, reset, calls } = require('./helpers/mockDb');
 const { start, request } = require('./helpers/http');
@@ -312,4 +318,103 @@ test('role middleware blocks a teacher from the student-only scan endpoint', asy
   });
   assert.equal(res.status, 403);
   assert.match(res.body.error, /student/);
+});
+
+test('signup allows more than the old 20-request window from one IP', async () => {
+  // Invalid-role requests fail validation early but still pass through the
+  // signup limiter, so they exercise the cap without hashing passwords.
+  for (let i = 0; i < 21; i++) {
+    const res = await request(base, 'POST', '/auth/signup', {
+      body: {
+        email: `new-signup-${i}@example.com`,
+        password: 'secret123',
+        full_name: 'New Student',
+        role: 'admin',
+      },
+    });
+    assert.equal(res.status, 400, `signup attempt ${i + 1} should not be rate limited`);
+    assert.match(res.body.error, /Role must be/);
+  }
+});
+
+test('login throttles one email without blocking another email', async () => {
+  setHandler(async () => ({ rows: [] }));
+
+  const attempt = (email) =>
+    request(base, 'POST', '/auth/login', {
+      body: { email, password: 'wrong-password' },
+    });
+
+  for (let i = 0; i < 3; i++) {
+    const res = await attempt('limited.account@example.com');
+    assert.equal(res.status, 401);
+  }
+
+  const limited = await attempt('LIMITED.ACCOUNT@example.com');
+  assert.equal(limited.status, 429);
+  assert.match(limited.body.error, /Too many login attempts for this account/i);
+
+  const other = await attempt('other.account@example.com');
+  assert.equal(other.status, 401);
+});
+
+test('a valid login still succeeds while another account is throttled', async () => {
+  const hash = await bcrypt.hash('correct-password', 4);
+  setHandler(async (sql, params) => {
+    if (/select \* from users/i.test(sql) && params[0] === users.teacher.email) {
+      return {
+        rows: [
+          {
+            id: users.teacher.id,
+            email: users.teacher.email,
+            full_name: users.teacher.full_name,
+            role: 'teacher',
+            password_hash: hash,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      };
+    }
+    return { rows: [] };
+  });
+
+  const throttledEmail = 'throttled.account@example.com';
+  for (let i = 0; i < 3; i++) {
+    await request(base, 'POST', '/auth/login', {
+      body: { email: throttledEmail, password: 'wrong-password' },
+    });
+  }
+  const throttled = await request(base, 'POST', '/auth/login', {
+    body: { email: throttledEmail, password: 'wrong-password' },
+  });
+  assert.equal(throttled.status, 429);
+
+  const valid = await request(base, 'POST', '/auth/login', {
+    body: { email: users.teacher.email, password: 'correct-password' },
+  });
+  assert.equal(valid.status, 200);
+  assert.ok(valid.body.token);
+  assert.equal(valid.body.user.email, users.teacher.email);
+});
+
+test('the per-IP login cap eventually throttles many different accounts', async () => {
+  setHandler(async () => ({ rows: [] }));
+
+  let limited = null;
+
+  for (let i = 0; i < 40 && !limited; i++) {
+    const res = await request(base, 'POST', '/auth/login', {
+      body: { email: `class-student-${i}@example.com`, password: 'wrong-password' },
+    });
+    if (res.status === 429) {
+      limited = res;
+      break;
+    }
+    assert.equal(res.status, 401);
+  }
+
+  assert.ok(limited, 'the per-IP login cap should return 429');
+  // The per-email limiter uses a different message, so this proves the
+  // many-distinct-emails traffic was capped by the per-IP limiter instead.
+  assert.match(limited.body.error, /Too many requests/i);
 });
