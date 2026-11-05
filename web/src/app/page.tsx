@@ -119,8 +119,8 @@ export default function HomePage() {
       router.push('/login');
     } else if (user) {
       if (user.role !== 'teacher') {
-        // The web dashboard is instructor-only; students use the Android app.
-        router.replace('/login?reason=instructor_only');
+        // The instructor dashboard is teacher-only; students use the PWA.
+        router.replace('/student');
         return;
       }
       fetchClassrooms();

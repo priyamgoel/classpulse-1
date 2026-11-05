@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Alert,
   Box,
@@ -14,19 +15,23 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
+import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import Link from 'next/link';
+import IosShareIcon from '@mui/icons-material/IosShare';
+import AddToHomeScreenIcon from '@mui/icons-material/AddToHomeScreen';
 import { m3Tokens } from '@/theme/tokens';
+import { getClientPwaState } from '@/lib/studentPwa';
 
 export default function JoinPage() {
   const [code, setCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isIos, setIsIos] = useState(false);
 
   useEffect(() => {
     const raw = new URLSearchParams(window.location.search).get('code');
-    setCode(raw ? raw.trim() : '');
+    setCode(raw ? raw.trim().toUpperCase() : '');
+    setIsIos(getClientPwaState().isIos);
   }, []);
 
   const handleCopy = async () => {
@@ -34,16 +39,18 @@ export default function JoinPage() {
     try {
       await navigator.clipboard.writeText(code);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard access can be blocked; the code is still visible to type manually.
+      // The code is still visible to type manually.
     }
   };
+
+  const studentJoinHref = code ? `/student/join?code=${encodeURIComponent(code)}` : '/student';
 
   return (
     <Box
       sx={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -52,7 +59,7 @@ export default function JoinPage() {
         px: 2,
       }}
     >
-      <Container maxWidth="sm">
+      <Container maxWidth="sm" disableGutters>
         <Card sx={{ borderRadius: m3Tokens.shape.large }}>
           <CardContent sx={{ p: { xs: 3, sm: 5 }, textAlign: 'center' }}>
             <Box
@@ -69,17 +76,17 @@ export default function JoinPage() {
                 mb: 2,
               }}
             >
-              <PhoneAndroidIcon sx={{ fontSize: 38 }} />
+              <PhoneIphoneIcon sx={{ fontSize: 38 }} />
             </Box>
 
-            <Typography variant="h4" sx={{ color: m3Tokens.color.primary, fontWeight: 800, mb: 0.5 }}>
+            <Typography variant="h4" sx={{ color: m3Tokens.color.primary, fontWeight: 900, mb: 0.5 }}>
               ClassPulse
             </Typography>
-            <Typography variant="subtitle1" sx={{ color: m3Tokens.color.onSurface, fontWeight: 700, mb: 0.5 }}>
-              Join a classroom on Android
+            <Typography variant="subtitle1" sx={{ color: m3Tokens.color.onSurface, fontWeight: 800, mb: 0.5 }}>
+              Join a classroom
             </Typography>
             <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mb: 3 }}>
-              Enter this code in the ClassPulse Android app to enrol in your instructor&apos;s section.
+              Use the ClassPulse student app on iPhone, Android, or in your browser.
             </Typography>
 
             {code === null ? null : code ? (
@@ -90,21 +97,20 @@ export default function JoinPage() {
                     display: 'block',
                     textTransform: 'uppercase',
                     letterSpacing: '1px',
-                    fontWeight: 700,
+                    fontWeight: 800,
                     color: m3Tokens.color.onSurfaceVariant,
                     mb: 1,
                   }}
                 >
-                  Your classroom join code
+                  Classroom join code
                 </Typography>
-
                 <Box
                   sx={{
                     p: { xs: 2.5, sm: 3 },
                     borderRadius: m3Tokens.shape.large,
                     backgroundColor: m3Tokens.color.primaryContainer,
                     color: m3Tokens.color.onPrimaryContainer,
-                    mb: 3,
+                    mb: 2,
                   }}
                 >
                   <Typography
@@ -120,57 +126,80 @@ export default function JoinPage() {
                     {code}
                   </Typography>
                 </Box>
-
                 <Button
                   variant={copied ? 'outlined' : 'contained'}
                   color={copied ? 'success' : 'primary'}
                   startIcon={copied ? <CheckCircleIcon /> : <ContentCopyIcon />}
                   onClick={handleCopy}
-                  sx={{ mb: 3, fontWeight: 700, textTransform: 'none', px: 3 }}
+                  sx={{ mb: 3, fontWeight: 800, textTransform: 'none', px: 3 }}
                 >
-                  {copied ? 'Copied!' : 'Copy Code'}
+                  {copied ? 'Copied!' : 'Copy code'}
                 </Button>
               </>
             ) : (
-              <Alert severity="warning" sx={{ mb: 3, textAlign: 'left', borderRadius: '10px' }}>
-                <strong>No join code found.</strong> Ask your instructor for the 6-character classroom code, then
-                reopen the link they shared with you.
+              <Alert severity="warning" sx={{ mb: 3, textAlign: 'left', borderRadius: 2 }}>
+                <strong>No join code found.</strong> Ask your instructor for the
+                6-character code, then reopen the link they shared.
               </Alert>
             )}
 
             <Divider sx={{ mb: 3 }} />
 
             <Stack spacing={1.5} sx={{ textAlign: 'left', mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: m3Tokens.color.onSurface }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 900, color: m3Tokens.color.onSurface }}>
                 How to join
               </Typography>
-              {[
-                'Install and open the ClassPulse Android app.',
-                'Sign in with your student account.',
-                'Tap “Join Classroom” and enter the code above.',
-              ].map((step, index) => (
-                <Stack key={step} direction="row" spacing={1.5} alignItems="flex-start">
-                  <Chip
-                    label={index + 1}
-                    size="small"
-                    sx={{
-                      height: 22,
-                      minWidth: 22,
-                      fontWeight: 800,
-                      bgcolor: m3Tokens.color.secondaryContainer,
-                      color: m3Tokens.color.onSecondaryContainer,
-                    }}
-                  />
-                  <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
-                    {step}
-                  </Typography>
-                </Stack>
-              ))}
+              {isIos ? (
+                <>
+                  <Step n={1}>
+                    Open this page in Safari, then tap{' '}
+                    <IosShareIcon sx={{ fontSize: 15, verticalAlign: 'text-bottom' }} />{' '}
+                    Share.
+                  </Step>
+                  <Step n={2}>
+                    Choose <strong>Add to Home Screen</strong>{' '}
+                    <AddToHomeScreenIcon sx={{ fontSize: 15, verticalAlign: 'text-bottom' }} />{' '}
+                    and open ClassPulse from your Home Screen.
+                  </Step>
+                  <Step n={3}>
+                    Sign in, tap <strong>Join</strong>, and paste the code above.
+                  </Step>
+                </>
+              ) : (
+                <>
+                  <Step n={1}>Install the Android app or open the ClassPulse web app.</Step>
+                  <Step n={2}>Sign in with your student account.</Step>
+                  <Step n={3}>
+                    Tap <strong>Join</strong> and enter the code above.
+                  </Step>
+                </>
+              )}
+            </Stack>
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ mb: 3 }}>
+              <Button
+                component={Link}
+                href={studentJoinHref}
+                variant="contained"
+                fullWidth
+                sx={{ fontWeight: 800, textTransform: 'none' }}
+              >
+                Open student app
+              </Button>
+              <Button
+                component={Link}
+                href="/student/install"
+                variant="outlined"
+                fullWidth
+                sx={{ fontWeight: 800, textTransform: 'none' }}
+              >
+                Install guide
+              </Button>
             </Stack>
 
             <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
               Are you an instructor?{' '}
-              <MuiLink component={Link} href="/login" underline="hover" sx={{ fontWeight: 700 }}>
+              <MuiLink component={Link} href="/login" underline="hover" sx={{ fontWeight: 800 }}>
                 Sign in to the web dashboard
               </MuiLink>
             </Typography>
@@ -178,5 +207,26 @@ export default function JoinPage() {
         </Card>
       </Container>
     </Box>
+  );
+}
+
+function Step({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <Stack direction="row" spacing={1.5} alignItems="flex-start">
+      <Chip
+        label={n}
+        size="small"
+        sx={{
+          height: 22,
+          minWidth: 22,
+          fontWeight: 800,
+          bgcolor: m3Tokens.color.secondaryContainer,
+          color: m3Tokens.color.onSecondaryContainer,
+        }}
+      />
+      <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant }}>
+        {children}
+      </Typography>
+    </Stack>
   );
 }

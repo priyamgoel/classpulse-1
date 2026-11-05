@@ -35,8 +35,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const storedUser = getStoredUser<User>();
 
     if (storedToken && storedUser) {
-      // The web dashboard is instructor-only: never restore a student session.
-      if (isTokenExpired(storedToken) || storedUser.role !== 'teacher') {
+      // The instructor dashboard and the student PWA share this provider.
+      // Route-level guards decide which role may access which surface.
+      if (isTokenExpired(storedToken)) {
         clearAuthStorage();
       } else {
         setToken(storedToken);

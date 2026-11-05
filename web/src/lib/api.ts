@@ -1,4 +1,5 @@
 import { clearAuthStorage, getAuthToken, isTokenExpired } from '@/lib/authStorage';
+import { isAuthPage, loginPathForPath } from '@/lib/authRouting';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -6,11 +7,11 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost
 function redirectToLogin(): void {
   if (typeof window === 'undefined') return;
   const { pathname, search } = window.location;
-  if (pathname.startsWith('/login') || pathname.startsWith('/signup')) return;
+  if (isAuthPage(pathname)) return;
   const reason = 'reason=session_expired';
   // Avoid stacking duplicate history entries if a page fires several requests.
   if (search.includes(reason)) return;
-  window.location.assign(`/login?${reason}`);
+  window.location.assign(`${loginPathForPath(pathname)}?${reason}`);
 }
 
 /**

@@ -19,7 +19,6 @@ import {
 } from '@mui/material';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import PhoneAndroidIcon from '@mui/icons-material/PhoneAndroid';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { useAuth } from '@/context/AuthContext';
@@ -35,7 +34,7 @@ export default function LoginPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const { login, logout } = useAuth();
+  const { login } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -45,15 +44,15 @@ export default function LoginPage() {
       setNotice('Your session expired. Please sign in again.');
     } else if (reason === 'instructor_only') {
       setNotice(
-        'The web dashboard is for instructors only. Student accounts should use the ClassPulse Android app.'
+        'The web dashboard is for instructors only. Student accounts use the ClassPulse student web app.'
       );
     }
 
-    // A valid teacher session should skip the form entirely.
+    // A valid session should skip the form and go to its own surface.
     const storedToken = getAuthToken();
     const storedUser = getStoredUser<{ role?: string }>();
-    if (storedToken && !isTokenExpired(storedToken) && storedUser?.role === 'teacher') {
-      router.replace('/');
+    if (storedToken && !isTokenExpired(storedToken) && storedUser?.role) {
+      router.replace(storedUser.role === 'student' ? '/student' : '/');
     }
   }, [router]);
 
@@ -66,16 +65,10 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result.success) {
-      // Check if user is a student attempting to access Web Dashboard
       const storedUser = getStoredUser<{ role: string }>();
-      if (storedUser) {
-        if (storedUser.role === 'student') {
-          logout();
-          setError(
-            'Student accounts access ClassPulse via the Android mobile app. Please open the ClassPulse Android App on your phone to log in.'
-          );
-          return;
-        }
+      if (storedUser?.role === 'student') {
+        router.replace('/student');
+        return;
       }
       router.push('/');
     } else {
@@ -111,11 +104,7 @@ export default function LoginPage() {
             )}
 
             {error && (
-              <Alert
-                severity={error.includes('Android mobile app') ? 'info' : 'error'}
-                icon={error.includes('Android mobile app') ? <PhoneAndroidIcon fontSize="inherit" /> : undefined}
-                sx={{ mb: 2.5 }}
-              >
+              <Alert severity="error" sx={{ mb: 2.5 }}>
                 {error}
               </Alert>
             )}
@@ -186,6 +175,12 @@ export default function LoginPage() {
                 New Instructor?{' '}
                 <MuiLink component={Link} href="/signup" underline="hover" sx={{ fontWeight: 700 }}>
                   Register Instructor Account
+                </MuiLink>
+              </Typography>
+              <Typography variant="body2" sx={{ color: m3Tokens.color.onSurfaceVariant, mt: 1.5 }}>
+                Student?{' '}
+                <MuiLink component={Link} href="/student/login" underline="hover" sx={{ fontWeight: 700 }}>
+                  Open the student app
                 </MuiLink>
               </Typography>
             </Box>

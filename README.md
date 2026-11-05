@@ -24,7 +24,7 @@ Current implementation:
 ```
 classpulse-1/
 ├── backend/    # Node.js + Express REST & Socket.io API
-├── web/        # Next.js + MUI instructor dashboard
+├── web/        # Next.js + MUI instructor dashboard and student PWA
 └── mobile/     # Flutter Android student app
 ```
 
@@ -64,7 +64,8 @@ the API; it defaults to `http://localhost:3000`. See
 
 ## Web Setup
 
-The web app is the instructor dashboard.
+The web app hosts the instructor dashboard at `/` and the student PWA at
+`/student`.
 
 ```bash
 cd web
@@ -83,7 +84,41 @@ Build the production bundle with:
 npm run build
 ```
 
-The dashboard runs at `http://localhost:3000`.
+- Instructor dashboard: `http://localhost:3000`
+- Student web app: `http://localhost:3000/student`
+- Install guide: `http://localhost:3000/student/install`
+
+## Student PWA (iOS + Android)
+
+The student PWA supports iOS 18+ and is installed from Safari via
+**Share → Add to Home Screen**. It does not go through the App Store. The same
+web app also installs from Chrome on Android; the native Flutter app remains
+available.
+
+What is included:
+
+- Student login/signup and session persistence
+- Classroom join/unenroll and classroom details
+- Multi-frame QR attendance using a self-hosted WASM decoder
+  (`barcode-detector` + ZXing)
+- Attendance history with per-classroom drill-downs and capture latency (ACL)
+- PulseMeter (word cloud, MCQ, rating scale)
+- Live quizzes with server-driven timers, reveal states, and final results
+- Doubt forum with search, filters, topics, pseudonymity, helpful marks,
+  accepted solutions, and teacher endorsements
+- PWA manifest, service worker, offline screen, install onboarding, and update
+  prompt
+
+Camera access requires HTTPS. On a physical iPhone, install first and then sign
+in: the installed app has its own storage container, separate from Safari. iOS may
+re-request camera permission on each cold launch; this is a known WebKit
+behaviour. See [`IOS_TEST_CHECKLIST.md`](IOS_TEST_CHECKLIST.md) for the device
+release checklist and [`IOS_PWA_EXECUTION_PLAN.md`](IOS_PWA_EXECUTION_PLAN.md) for
+the build plan.
+
+The QR decoder WASM file lives at
+`web/public/student/wasm/zxing_reader.wasm`; it is served locally so scanning
+does not depend on a CDN.
 
 ## Mobile Setup
 
@@ -107,13 +142,17 @@ flutter build apk --release --dart-define=API_BASE_URL=https://your-api.example.
 
 ## Roles
 
-- **Web is instructor-only.** Teachers create and manage sections, sessions, activities,
-  quizzes, analytics, and forum moderation. Teacher accounts are created on the web
-  signup page; when `TEACHER_INVITE_CODE` is configured, signup requires that code. In
-  production, teacher signup is closed if no invite code is configured.
-- **Mobile is student-only.** Students join sections with a 6-character code, scan QR
-  attendance streams, answer live activities and quizzes, and participate in the forum.
-- Student accounts are created in the mobile app; teacher accounts are created on the web.
+- **Instructor dashboard (`/`).** Teachers create and manage sections, sessions,
+  activities, quizzes, analytics, and forum moderation. Teacher accounts are created
+  on the web signup page; when `TEACHER_INVITE_CODE` is configured, signup requires
+  that code. In production, teacher signup is closed if no invite code is configured.
+- **Student PWA (`/student`).** Students join sections with a 6-character code, scan
+  QR attendance streams, answer live activities and quizzes, and participate in the
+  forum. Works on iOS 18+, Android, and desktop browsers.
+- **Native Android app.** The Flutter student app remains fully supported and uses
+  the same backend.
+- Student accounts can be created in the PWA or the Android app; teacher accounts
+  are created on the instructor signup page.
 
 ## Testing
 
@@ -124,9 +163,10 @@ Run each suite from its app directory:
 cd backend
 npm test
 
-# Web — unit tests and production build
+# Web — unit tests, type-check, and production build
 cd web
 npm test
+npm run typecheck
 npm run build
 
 # Mobile — static analysis and tests

@@ -175,7 +175,35 @@ fallback is per instance and is not suitable for multi-instance deployments.
 5. Under **"Environment Variables"**, add:
    - `NEXT_PUBLIC_API_URL` — the deployed backend origin from Step A
 6. Add the same web origin to the backend's `CORS_ORIGINS` and redeploy the backend.
-7. Click **"Deploy"**. Vercel builds and serves the instructor dashboard.
+7. Click **"Deploy"**. Vercel builds and serves the instructor dashboard at `/`
+   and the student PWA at `/student`.
+
+### B2. Student PWA on iOS
+
+The student PWA is part of the same `web/` deployment. No additional service is
+required.
+
+Requirements:
+
+- HTTPS on the deployed web origin. Camera access will not work over plain HTTP.
+- The web origin must be in the backend's `CORS_ORIGINS` (the same origin that
+  already serves the instructor dashboard).
+- `NEXT_PUBLIC_API_URL` must point at the deployed API origin.
+- `web/public/student/wasm/zxing_reader.wasm` must be deployed with the app. It
+  is committed as a static asset and is loaded only when the scanner opens.
+- `web/public/student/sw.js` and `web/public/student/manifest.webmanifest` must
+  be served from the same origin.
+
+After deploying:
+
+1. Open `https://<web-domain>/student/install` in Safari on an iPhone (iOS 18+).
+2. Follow the Share → Add to Home Screen steps.
+3. Launch the installed app, sign in with a student account, and test the QR
+   scanner against a live instructor session.
+4. Run the full device checklist in [`IOS_TEST_CHECKLIST.md`](IOS_TEST_CHECKLIST.md).
+
+The service worker and manifest are sent with `Cache-Control: no-cache` by
+`web/next.config.js`. Do not add long-lived caching for those two files.
 
 ### C. Build and Distribute the Android APK
 
@@ -211,6 +239,8 @@ npm test
 # Web
 cd ../web
 npm ci
+npm test
+npm run typecheck
 npm run build
 
 # Mobile
@@ -229,11 +259,16 @@ Deployment checks:
 - [ ] `TEACHER_INVITE_CODE` is set if teacher self-signup is enabled.
 - [ ] `NEXT_PUBLIC_API_URL` points at the deployed backend origin.
 - [ ] `/health` returns `200` with `"status": "ok"`.
+- [ ] The deployed web origin serves `/student/manifest.webmanifest` as
+      `application/manifest+json`.
+- [ ] `/student/sw.js` returns `Cache-Control: no-cache`.
+- [ ] `/student/wasm/zxing_reader.wasm` returns `200` (camera scanning depends on it).
+- [ ] The iOS install flow and scanner pass [`IOS_TEST_CHECKLIST.md`](IOS_TEST_CHECKLIST.md).
 - [ ] Mobile APK was built with the production `API_BASE_URL`.
 - [ ] Warning emails work if `BREVO_API_KEY`, `RESEND_API_KEY`, or SMTP is configured.
 
-The GitHub Actions workflow performs the backend syntax check and tests, the web build,
-and the mobile analyze, test, and APK build.
+The GitHub Actions workflow performs the backend syntax check and tests, the web tests,
+type-check, and production build, and the mobile analyze, test, and APK build.
 
 ---
 
@@ -279,7 +314,7 @@ hostname stops resolving (`getaddrinfo ENOTFOUND <name>.upstash.io`).
 
 | Area | Current implementation |
 |---|---|
-| **Authentication & roles** | Teacher and student login/signup with role guards; web is instructor-only, mobile is student-only. |
+| **Authentication & roles** | Teacher and student login/signup with role guards; `/` is instructor-only, `/student` is student-only, and the native Android app remains student-only. |
 | **Classroom management** | Course catalog, section creation, 6-character join code/link/QR. |
 | **Student join flow** | Students join sections from the mobile app using the join code. |
 | **Anti-proxy QR attendance** | 3-QR timestamped, HMAC-SHA256 signed rotating token stream with short-lived Redis tokens. |

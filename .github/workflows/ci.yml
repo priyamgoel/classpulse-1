@@ -56,6 +56,9 @@ jobs:
       - name: Run Web Tests
         run: npm test
 
+      - name: Type-check Web App
+        run: npm run typecheck
+
       - name: Build Next.js Production App
         run: npm run build
         env:

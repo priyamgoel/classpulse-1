@@ -68,7 +68,11 @@ export default function SignupPage() {
             </Typography>
 
             <Alert severity="info" icon={<PhoneAndroidIcon fontSize="inherit" />} sx={{ mb: 2.5, fontSize: '0.85rem' }}>
-              <strong>Students:</strong> Please register and join classes using the <strong>ClassPulse Android App</strong> on your phone.
+              <strong>Students:</strong> register in the{' '}
+              <MuiLink component={Link} href="/student/signup" underline="hover" sx={{ fontWeight: 700 }}>
+                ClassPulse student app
+              </MuiLink>{' '}
+              (works on iPhone, Android, and desktop).
             </Alert>
 
             {error && (
@@ -96,7 +100,7 @@ export default function SignupPage() {
                   onChange={(e) => setEmail(e.target.value)}
                 />
                 <TextField
-                  label="Password (min 6 chars)"
+                  label="Password (min 8 chars)"
                   type="password"
                   fullWidth
                   required
